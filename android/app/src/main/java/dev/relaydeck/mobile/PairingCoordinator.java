@@ -77,7 +77,7 @@ final class PairingCoordinator {
             context.getSharedPreferences("MainActivity",Context.MODE_PRIVATE).edit().putString("networkMode","relay").apply();
             if(EasyTierVpnService.running)EasyTierVpnService.disconnect(context);
             new SecureSession(context,"pending-pairing").clear();failed=false;announce(context,"配对成功，正在进入对话…");
-        }catch(Exception error){RemoteApi.release(candidate);failed=true;announce(context,error.getMessage()==null?"Relay 配对未完成，请重试或重新扫码":error.getMessage());}
-        finally{busy.set(false);context.sendBroadcast(new Intent(UPDATE).setPackage(context.getPackageName()));}});
+        }catch(Exception error){failed=true;announce(context,error.getMessage()==null?"Relay 配对未完成，请重试或重新扫码":error.getMessage());}
+        finally{RemoteApi.release(candidate);busy.set(false);context.sendBroadcast(new Intent(UPDATE).setPackage(context.getPackageName()));}});
     }
 }
