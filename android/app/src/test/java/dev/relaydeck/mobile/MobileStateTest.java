@@ -4,6 +4,17 @@ import org.json.*;
 import static org.junit.Assert.*;
 
 public class MobileStateTest {
+    @Test public void connectionModesNeverConfuseRelayWithEasyTierVpn(){
+        assertEquals("relay",ConnectionMode.normalize("relay"));
+        assertEquals("easytier",ConnectionMode.normalize("easytier"));
+        assertEquals("lan",ConnectionMode.normalize("unknown"));
+        assertEquals("relay",ConnectionMode.normalize(ConnectionMode.RELAY));
+        assertFalse(ConnectionMode.requiresVpn("relay"));
+        assertTrue(ConnectionMode.requiresVpn("easytier"));
+        assertFalse(ConnectionMode.shouldShowEasyTierSetup("relay",false));
+        assertTrue(ConnectionMode.shouldShowEasyTierSetup("easytier",false));
+        assertFalse(ConnectionMode.shouldShowEasyTierSetup("easytier",true));
+    }
     @Test public void quotaWidgetUsesBoundedValuesAndDistinguishesLiveCachedAndOffline()throws Exception{
         JSONObject full=new JSONObject()
             .put("available",true)
