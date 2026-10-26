@@ -2,7 +2,7 @@ param([switch]$Administrator, [string]$DataDirectory)
 $ErrorActionPreference = 'Stop'
 $taskPlugin = Split-Path -Parent $PSScriptRoot
 if (-not $DataDirectory) { $DataDirectory = Join-Path $env:LOCALAPPDATA 'RelayDeck' }
-$env:RELAYDECK_MANAGER_PORT = '29647'
+if (-not $env:RELAYDECK_MANAGER_PORT) { $env:RELAYDECK_MANAGER_PORT = '29647' }
 $taskEndpointPath = Join-Path $DataDirectory 'manager.local.json'
 if ($Administrator) {
     $taskArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'), '-DataDirectory', ('"' + $DataDirectory + '"'))

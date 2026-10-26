@@ -1,6 +1,6 @@
 {
   "name": "relaydeck-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "RelayDeck：管理 Codex 手机远控、配对设备，以及已有网络或插件内置 EasyTier。",
   "author": { "name": "RelayDeck" },
   "mcpServers": "./.mcp.json",

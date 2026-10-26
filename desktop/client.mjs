@@ -31,7 +31,7 @@ async function findOrStartManager(root) {
   if (!await startBackgroundTask(root)) {
     const child = spawn(process.execPath, [fileURLToPath(new URL('./daemon.mjs', import.meta.url)), '--data', root], {
       detached: true, windowsHide: true, stdio: 'ignore',
-      env: { ...process.env, RELAYDECK_MANAGER_PORT: String(MANAGER_PORT) }
+      env: { ...process.env, RELAYDECK_MANAGER_PORT: process.env.RELAYDECK_MANAGER_PORT || String(MANAGER_PORT) }
     });
     child.on('error', () => {}); child.unref();
   }
