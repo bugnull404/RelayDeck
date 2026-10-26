@@ -8,7 +8,12 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
-import { ensureManager, restoreAutoStart } from '../desktop/client.mjs';
+import { MANAGER_PORT, ensureManager, restoreAutoStart } from '../desktop/client.mjs';
+
+test('manager uses a dedicated loopback port instead of the legacy project port', () => {
+  assert.equal(MANAGER_PORT, 29647);
+  assert.notEqual(MANAGER_PORT, 19547);
+});
 
 test('Windows background entry does not launch a daemon when auto-start is disabled', async () => {
   const root=await mkdtemp(join(tmpdir(),'relaydeck-disabled-task-'));

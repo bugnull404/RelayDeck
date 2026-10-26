@@ -2,6 +2,8 @@ param([switch]$Administrator, [string]$DataDirectory)
 $ErrorActionPreference = 'Stop'
 $taskPlugin = Split-Path -Parent $PSScriptRoot
 if (-not $DataDirectory) { $DataDirectory = Join-Path $env:LOCALAPPDATA 'RelayDeck' }
+$env:RELAYDECK_MANAGER_PORT = '29647'
+$taskEndpointPath = Join-Path $DataDirectory 'manager.local.json'
 if ($Administrator) {
     $taskArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'), '-DataDirectory', ('"' + $DataDirectory + '"'))
     $taskIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -12,7 +14,6 @@ if ($Administrator) {
         return
     }
     & (Join-Path $PSScriptRoot 'configure-desktop-autostart.ps1') -DataDirectory $DataDirectory -Highest
-    $taskEndpointPath = Join-Path $DataDirectory 'manager.local.json'
     if (Test-Path -LiteralPath $taskEndpointPath) {
         $taskEndpoint = Get-Content -LiteralPath $taskEndpointPath -Raw | ConvertFrom-Json
         if ($taskEndpoint.origin -notmatch '^http://127\.0\.0\.1:\d+$') { throw '本机管理地址无效' }

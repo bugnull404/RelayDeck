@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdir, rm, rmdir, stat, readFile, writeFile } from 'node:fs/promises';
 import { createManager } from './manager.mjs';
 import { atomicJson, protectDirectory, readJson } from './config.mjs';
-import { dataRoot } from './client.mjs';
+import { dataRoot, MANAGER_PORT } from './client.mjs';
 import { configureAutoStart } from './autostart.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(process.argv.includes('--data') ? process.argv[process.argv.indexOf('--data') + 1] : dataRoot());
@@ -21,7 +21,7 @@ catch (error) {
 await writeFile(join(lock, 'pid'), String(process.pid), { mode: 0o600 });
 let manager;
 try {
-  manager = await createManager({ root, assets: join(here, 'web'), binDir: join(here, '..', 'vendor', 'easytier'), port: Number(process.env.RELAYDECK_MANAGER_PORT || 19547), onShutdown: close, syncAutoStart: configureAutoStart });
+  manager = await createManager({ root, assets: join(here, 'web'), binDir: join(here, '..', 'vendor', 'easytier'), port: Number(process.env.RELAYDECK_MANAGER_PORT || MANAGER_PORT), onShutdown: close, syncAutoStart: configureAutoStart });
   await atomicJson(join(root, 'manager.local.json'), { origin: new URL(manager.url).origin, token: manager.token, pid: process.pid });
   const config = await readJson(join(root, 'config.local.json'), null);
   if (config?.autoStart === true) void manager.restore().catch(() => {});

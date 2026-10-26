@@ -11,7 +11,7 @@ import { pairingInfo } from './pairing.mjs';
 import { desktopVersion } from './version.mjs';
 const fail = (status, message) => Object.assign(Error(message), { status });
 const safeEqual = (a, b) => typeof a === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
-export async function createManager({ root, assets, binDir, port = 19547, runtime = new GatewayRuntime(root), easytier = new EasyTierManager(binDir, { dataDir: join(root, 'easytier') }), store = new ConfigStore(root), token = randomBytes(32).toString('hex'), onShutdown = () => {}, syncAutoStart = async () => {}, restoreDelays = [1000, 3000, 10000, 30000] }) {
+export async function createManager({ root, assets, binDir, port = 29647, runtime = new GatewayRuntime(root), easytier = new EasyTierManager(binDir, { dataDir: join(root, 'easytier') }), store = new ConfigStore(root), token = randomBytes(32).toString('hex'), onShutdown = () => {}, syncAutoStart = async () => {}, restoreDelays = [1000, 3000, 10000, 30000] }) {
   let mutation = Promise.resolve(); const events = [];
   let restoreTimer, restoreGeneration = 0, closed = false;
   let recovery = { state: 'idle', attempts: 0, nextRetryAt: null };

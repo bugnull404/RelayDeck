@@ -1,6 +1,7 @@
 param([string]$CodexPath, [string]$DataDirectory)
 $ErrorActionPreference = 'Stop'
 $taskBundle = $PSScriptRoot
+$env:RELAYDECK_MANAGER_PORT = '29647'
 if (-not (Test-Path -LiteralPath (Join-Path $taskBundle '.agents\plugins\marketplace.json'))) { throw '请从完整桌面插件发布包中运行此安装脚本' }
 if (-not $CodexPath) {
     $taskCodexFiles = @(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin') -Directory -ErrorAction SilentlyContinue | ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName 'codex.exe') -ErrorAction SilentlyContinue } | Sort-Object LastWriteTime -Descending)

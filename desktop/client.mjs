@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { readJson } from './config.mjs';
 import { fileURLToPath } from 'node:url';
 import { startBackgroundTask } from './autostart.mjs';
+export const MANAGER_PORT = 29647;
 export function dataRoot() {
   if (process.env.RELAYDECK_DATA_DIR) return process.env.RELAYDECK_DATA_DIR;
   if (!process.env.LOCALAPPDATA) throw Error('此插件需要 Windows 本地执行环境');
@@ -28,7 +29,10 @@ async function findOrStartManager(root) {
   const available = endpoint => endpoint && adminCall(endpoint, '/api/status', undefined, 1500).then(value => value.kind === 'relaydeck-manager', () => false);
   if (await available(endpoint)) return endpoint;
   if (!await startBackgroundTask(root)) {
-    const child = spawn(process.execPath, [fileURLToPath(new URL('./daemon.mjs', import.meta.url)), '--data', root], { detached: true, windowsHide: true, stdio: 'ignore', env: process.env });
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./daemon.mjs', import.meta.url)), '--data', root], {
+      detached: true, windowsHide: true, stdio: 'ignore',
+      env: { ...process.env, RELAYDECK_MANAGER_PORT: String(MANAGER_PORT) }
+    });
     child.on('error', () => {}); child.unref();
   }
   for (let i = 0; i < 80; i++) {

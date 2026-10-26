@@ -91,6 +91,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-desktop-plugin.ps1
 - **VPS Relay**：Relay 部署在 VPS 上，手机与电脑都连接 `wss://` 公网地址。
 - **frp**：可以把本机 Relay 通过 frp TCP 或 HTTPS/vhost 暴露到公网；公网入口必须使用 TLS。
 
+桌面插件自身的管理页面固定监听 `127.0.0.1:29647`，只供本机 Codex 浏览器面板和设置快捷方式使用，不随远控模式变化，也不能从局域网直接访问。
+
 详细步骤见 [Relay 部署与 frp](docs/Relay-VPS与frp部署.md)。
 
 ### 直连模式

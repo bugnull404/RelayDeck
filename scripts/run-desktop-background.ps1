@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $taskPlugin = Split-Path -Parent $PSScriptRoot
 if (-not $DataDirectory) { $DataDirectory = Join-Path $env:LOCALAPPDATA 'RelayDeck' }
 $env:RELAYDECK_DATA_DIR = $DataDirectory
+$env:RELAYDECK_MANAGER_PORT = '29647'
 $taskStateFile = Join-Path $DataDirectory 'background-status.local.json'
 [IO.File]::WriteAllText($taskStateFile, '{"phase":"launching"}', [Text.UTF8Encoding]::new($false))
 $taskProcess = Start-Process -FilePath (Join-Path $taskPlugin 'runtime\node.exe') -ArgumentList @(('"' + (Join-Path $taskPlugin 'desktop\background.mjs') + '"'), '--data', ('"' + $DataDirectory + '"')) -WindowStyle Hidden -Wait -PassThru
