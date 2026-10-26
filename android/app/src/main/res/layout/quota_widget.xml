@@ -116,7 +116,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="账户共享额度"
+            android:text="点击卡片查看额度气泡"
             android:textColor="#777B76"
             android:textSize="9sp" />
         <TextView

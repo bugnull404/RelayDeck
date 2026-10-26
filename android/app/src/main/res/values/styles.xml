@@ -17,4 +17,20 @@
         <item name="android:navigationBarColor">#F7F6F3</item>
         <item name="android:windowBackground">#F7F6F3</item>
     </style>
+    <style name="QuotaBubbleTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:colorAccent">#477A59</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    <style name="QuotaBubbleAnimation">
+        <item name="android:windowEnterAnimation">@anim/quota_bubble_in</item>
+        <item name="android:windowExitAnimation">@anim/quota_bubble_out</item>
+    </style>
 </resources>

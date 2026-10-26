@@ -66,7 +66,7 @@ public final class QuotaWidgetProvider extends AppWidgetProvider {
     }
 
     private static PendingIntent openApp(Context context){
-        return PendingIntent.getActivity(context,OPEN_REQUEST,new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        return PendingIntent.getActivity(context,OPEN_REQUEST,new Intent(context,QuotaBubbleActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
