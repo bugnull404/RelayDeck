@@ -1,11 +1,17 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:https';
+import { X509Certificate } from 'node:crypto';
 import { GatewayRuntime } from '../desktop/runtime.mjs';
 import { run } from '../desktop/config.mjs';
 const root = resolve('.local/verification/plugin-certificate-smoke'); await mkdir(root, { recursive: true });
 const runtime = new GatewayRuntime(root);
 await runtime.prepareIdentity();
+const certificate = new X509Certificate(await readFile(join(root, 'secrets', 'gateway.crt')));
+if (!certificate.subjectAltName?.includes('DNS:localhost') || !certificate.subjectAltName?.includes('IP Address:127.0.0.1')) {
+  throw new Error('Gateway certificate is missing required local SANs');
+}
+if (Date.parse(certificate.validTo) <= Date.now()) throw new Error('Gateway certificate is expired');
 const server = createServer(runtime.tls);
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
 await new Promise(resolve => server.close(resolve));
