@@ -6,6 +6,8 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.os.Bundle;
 import android.widget.RemoteViews;
 import org.json.JSONObject;
 
@@ -37,10 +39,15 @@ public final class QuotaWidgetProvider extends AppWidgetProvider {
 
     private static void update(Context context,AppWidgetManager manager,int[] ids){
         Snapshot snapshot=snapshot(context);
-        for(int id:ids)manager.updateAppWidget(id,views(context,snapshot));
+        for(int id:ids)manager.updateAppWidget(id,views(context,snapshot,manager.getAppWidgetOptions(id)));
     }
 
-    private static RemoteViews views(Context context,Snapshot snapshot){
+    private static RemoteViews views(Context context,Snapshot snapshot,Bundle options){
+        int maxWidth=options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH,360);
+        int maxHeight=options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT,220);
+        int edge=Math.max(192,Math.min(384,Math.max(maxWidth,maxHeight)));
+        Bitmap character=CharacterArt.load(context,edge);
+        if(character!=null)return characterViews(context,snapshot,character);
         RemoteViews views=new RemoteViews(context.getPackageName(),R.layout.quota_widget);
         JSONObject primary=snapshot.value==null?null:snapshot.value.optJSONObject("primary");
         JSONObject secondary=snapshot.value==null?null:snapshot.value.optJSONObject("secondary");
@@ -62,6 +69,31 @@ public final class QuotaWidgetProvider extends AppWidgetProvider {
         views.setOnClickPendingIntent(R.id.quota_refresh,snapshot.paired?refreshUsage(context):open);
         views.setContentDescription(R.id.quota_widget_root,
             "剩余额度，"+primaryPeriod+" "+primaryPercent+"，"+secondaryPeriod+" "+secondaryPercent+"，"+status);
+        return views;
+    }
+
+    private static RemoteViews characterViews(Context context,Snapshot snapshot,Bitmap character){
+        RemoteViews views=new RemoteViews(context.getPackageName(),R.layout.quota_character_widget);
+        JSONObject primary=snapshot.value==null?null:snapshot.value.optJSONObject("primary");
+        JSONObject secondary=snapshot.value==null?null:snapshot.value.optJSONObject("secondary");
+        String status=UsagePresentation.widgetStatus(snapshot.value,snapshot.paired,snapshot.live,snapshot.online,System.currentTimeMillis());
+        String primaryPeriod=UsagePresentation.period(primary,"短周期");
+        String secondaryPeriod=UsagePresentation.period(secondary,"长周期");
+        String primaryPercent=snapshot.value==null?"--":UsagePresentation.percent(primary);
+        String secondaryPercent=snapshot.value==null?"--":UsagePresentation.percent(secondary);
+
+        views.setImageViewBitmap(R.id.quota_character,character);
+        views.setOnClickPendingIntent(R.id.quota_character_tap,openApp(context));
+        views.setTextViewText(R.id.quota_primary_percent,primaryPercent);
+        views.setTextViewText(R.id.quota_secondary_percent,secondaryPercent);
+        views.setTextViewText(R.id.quota_status,status);
+        views.setContentDescription(R.id.quota_character,
+            "角色素材。点击弹出额度气泡，"+primaryPeriod+" "+primaryPercent+"，"+secondaryPeriod+" "+secondaryPercent+"，"+status);
+
+        PendingIntent open=openApp(context);
+        views.setOnClickPendingIntent(R.id.quota_character,open);
+        views.setOnClickPendingIntent(R.id.quota_widget_root,open);
+        views.setOnClickPendingIntent(R.id.quota_refresh,snapshot.paired?refreshUsage(context):open);
         return views;
     }
 

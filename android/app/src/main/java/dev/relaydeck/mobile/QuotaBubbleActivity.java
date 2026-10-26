@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -18,6 +19,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import org.json.JSONObject;
@@ -91,13 +93,24 @@ public final class QuotaBubbleActivity extends Activity {
 
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        TextView mascot = new TextView(this);
-        mascot.setText("◕");
-        mascot.setTextSize(23);
-        mascot.setGravity(Gravity.CENTER);
-        mascot.setTextColor(surface);
-        mascot.setBackground(roundRect(green, 18));
-        top.addView(mascot, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        Bitmap character = CharacterArt.load(this, 192);
+        if (character != null) {
+            ImageView portrait = new ImageView(this);
+            portrait.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            portrait.setPadding(dp(3), dp(3), dp(3), dp(3));
+            portrait.setBackground(roundRect(getColorCompat("#E9E5DC"), 18));
+            portrait.setImageBitmap(character);
+            portrait.setContentDescription("已导入的角色素材");
+            top.addView(portrait, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        } else {
+            TextView mascot = new TextView(this);
+            mascot.setText("◕");
+            mascot.setTextSize(23);
+            mascot.setGravity(Gravity.CENTER);
+            mascot.setTextColor(surface);
+            mascot.setBackground(roundRect(green, 18));
+            top.addView(mascot, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        }
 
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);

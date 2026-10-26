@@ -15,9 +15,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
+    private static final int CHARACTER_ART_REQUEST = 210;
     private final ExecutorService worker = Executors.newFixedThreadPool(3);
     private final ChatFiles chatFiles=new ChatFiles(this);
     private AppUpdates appUpdates;
+    private Runnable characterArtRefresh;
+    private boolean characterArtBusy;
     private int background,foreground,muted,accent;
     private UiPalette palette;
     private int surface(int r,int g,int b){return UiPalette.color(this,Color.rgb(r,g,b));}
@@ -991,6 +994,7 @@ public final class MainActivity extends Activity {
         if(request==205){if(result==RESULT_OK)PairingCoordinator.start(this);else PairingCoordinator.permissionDenied(this);refreshPairingUi();return;}
         if(request==202){java.util.function.Consumer<Boolean> callback=switchVpnPermission;switchVpnPermission=null;if(callback!=null)callback.accept(result==RESULT_OK);return;}
         if(request==206){restoreVpnPermission=false;if(result==RESULT_OK)startForegroundService(new android.content.Intent(this,EasyTierVpnService.class));else toast("VPN 未授权，可在 EasyTier 设置中重新连接");return;}
+        if(request==CHARACTER_ART_REQUEST){if(result==RESULT_OK&&data!=null&&data.getData()!=null)importCharacterArt(data.getData());return;}
         if (request == 200) { if (result == RESULT_OK) startEasyTier(); else toast("未授予 VPN 权限"); }
     }
     private void beginPolling() { beginPolling(false); }
@@ -1081,11 +1085,64 @@ public final class MainActivity extends Activity {
         settingRow(items,"查看连接引导","预览扫码与配对页面，保留当前连接",()->{dialog.dismiss();connectionPage();});
         items.addView(text("关于",13,muted));items.addView(text("RelayDeck · "+appVersion()+"\n非官方远控客户端",14,muted));
         settingRow(items,"剩余额度小部件",api==null?"配对后可在桌面查看额度":"添加到桌面，查看短周期与长周期额度",this::pinQuotaWidget);
+        settingRow(items,"角色素材",CharacterArt.exists(this)?"已导入 · 点击桌面角色弹出额度气泡":"从本机导入透明 PNG/WebP · 点击角色弹出额度气泡",this::characterArtSettings);
           settingRow(items,"检测更新","主／次版本提醒、GitHub 下载与电脑插件更新",appUpdates::open);
         settingRow(items,"清除本机配对","删除本机连接信息，重新配对电脑",()->new AlertDialog.Builder(this).setTitle("清除本机配对？").setMessage("手机上的连接信息将删除。电脑端的授权记录仍需在电脑撤销；EasyTier 配置保留。")
             .setNegativeButton("返回",null).setPositiveButton("清除",(d,w)->{generation++;String computer=api.fingerprint;RemoteApi.release(api);stopService(new android.content.Intent(this,SessionService.class));SessionService.latest=null;SessionService.usage=null;SessionService.usageComputer="";SessionService.usageReceivedAt=0;UsageCache.clear(this,computer);api=null;currentState=null;selectedThreadId="";drafts.clear();storage.clear();QuotaWidgetProvider.updateAll(this);dialog.dismiss();connectionPage();}).show());
         android.os.Handler refresh=new android.os.Handler(getMainLooper());Runnable networkRefresh=new Runnable(){public void run(){networkHint.setText(EasyTierVpnService.state);if(dialog.isShowing())refresh.postDelayed(this,1000);}};dialog.setOnDismissListener(d->refresh.removeCallbacks(networkRefresh));
         dialog.show();dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);dialog.getWindow().setLayout(-1,-1);refresh.post(networkRefresh);
+    }
+    private void characterArtSettings() {
+        android.app.Dialog dialog=new android.app.Dialog(this);LinearLayout page=panel(dialog,"角色素材");
+        ScrollView scroll=new ScrollView(this);LinearLayout content=vertical();scroll.addView(content);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        content.addView(text("导入你自行选择的透明角色图。桌面小部件和额度气泡会使用同一张素材；图片只保存在本机 App 私有目录，不会上传到 Relay。",13,muted));
+        ImageView preview=new ImageView(this);preview.setScaleType(ImageView.ScaleType.FIT_CENTER);preview.setPadding(dp(18),dp(18),dp(18),dp(18));preview.setBackground(outlined(palette.raised,palette.borderStrong,20));
+        LinearLayout.LayoutParams previewSpace=new LinearLayout.LayoutParams(-1,dp(250));previewSpace.topMargin=dp(14);previewSpace.bottomMargin=dp(8);content.addView(preview,previewSpace);
+        TextView state=text("",12,muted);state.setTextIsSelectable(false);state.setGravity(android.view.Gravity.CENTER);content.addView(state);
+        Button choose=button("导入透明 PNG / WebP"),remove=button("移除角色素材");
+        remove.setBackground(rounded(palette.raised,16));remove.setTextColor(foreground);content.addView(choose);content.addView(remove);
+        Runnable refresh=()->{
+            boolean exists=CharacterArt.exists(this);
+            android.graphics.Bitmap bitmap=CharacterArt.exists(this)?CharacterArt.load(this,512):null;
+            if(bitmap!=null){preview.setPadding(0,0,0,0);preview.setImageBitmap(bitmap);state.setText("已导入 · 点击桌面角色即可弹出额度气泡");}
+            else{preview.setPadding(dp(78),dp(78),dp(78),dp(78));preview.setImageResource(R.drawable.app_icon);state.setText("尚未导入 · 默认显示额度卡片");}
+            choose.setText(exists?"更换角色素材":"导入透明 PNG / WebP");remove.setEnabled(exists);remove.setAlpha(exists?1f:.42f);
+        };
+        characterArtRefresh=refresh;refresh.run();
+        choose.setOnClickListener(v->{
+            if(characterArtBusy){toast("正在导入，请稍候");return;}
+            android.content.Intent intent=new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
+                .setType("image/*").addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try{startActivityForResult(intent,CHARACTER_ART_REQUEST);}catch(Exception error){toast("没有找到可用的文件选择器");}
+        });
+        remove.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("移除角色素材？").setMessage("桌面小部件将恢复默认额度卡片，额度数据和配对信息不会删除。")
+            .setNegativeButton("取消",null).setPositiveButton("移除",(d,w)->{CharacterArt.clear(this);QuotaWidgetProvider.updateAll(this);refresh.run();toast("角色素材已移除");}).show());
+        dialog.setOnDismissListener(d->{if(characterArtRefresh==refresh)characterArtRefresh=null;});
+        dialog.show();dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);dialog.getWindow().setLayout(Math.min(dp(440),getResources().getDisplayMetrics().widthPixels-dp(32)),-2);
+    }
+    private void importCharacterArt(android.net.Uri source) {
+        if(characterArtBusy||source==null)return;
+        characterArtBusy=true;toast("正在导入角色素材…");
+        worker.execute(()->{
+            try{
+                CharacterArt.importFrom(this,source);
+                runOnUiThread(()->{
+                    characterArtBusy=false;
+                    if(isDestroyed())return;
+                    QuotaWidgetProvider.updateAll(this);
+                    if(characterArtRefresh!=null)characterArtRefresh.run();
+                    toast("角色素材已更新，返回桌面即可查看");
+                });
+            }catch(Exception error){
+                runOnUiThread(()->{
+                    characterArtBusy=false;
+                    if(isDestroyed())return;
+                    String message=error.getMessage();
+                    toast("角色素材导入失败："+(message==null||message.trim().isEmpty()?"请选择有效的图片":message));
+                });
+            }
+        });
     }
     private String appVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception ignored){return "Preview";}}
     private android.content.SharedPreferences displayPreferences(){return getSharedPreferences("display",MODE_PRIVATE);}
