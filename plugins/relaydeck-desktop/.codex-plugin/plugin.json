@@ -1,0 +1,20 @@
+{
+  "name": "relaydeck-desktop",
+  "version": "0.1.0",
+  "description": "RelayDeck：管理 Codex 手机远控、配对设备，以及已有网络或插件内置 EasyTier。",
+  "author": { "name": "RelayDeck" },
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills",
+  "extensions": { "com.openai": { "onboardingSkill": "./skills/phone-settings/SKILL.md" } },
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "RelayDeck",
+    "shortDescription": "手机远控与连接设置",
+    "longDescription": "打开设置可在 Codex 内管理连接方式、EasyTier、配对和设备授权。无需使用桌面快捷方式。",
+    "defaultPrompt": ["打开 RelayDeck 设置，在 Codex 右侧面板显示设置页面。"],
+    "brandColor": "#99E6C5"
+  }
+}
+
+
+

@@ -1,0 +1,22 @@
+{
+  "name": "relaydeck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "start:gateway": "node scripts/start-gateway.mjs",
+    "verify:desktop": "node scripts/verify-desktop-ipc.mjs"
+  },
+  "devDependencies": {
+    "qrcode-generator": "2.0.4"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
+

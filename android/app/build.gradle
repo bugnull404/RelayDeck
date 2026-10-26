@@ -1,0 +1,43 @@
+plugins { id 'com.android.application' }
+def releaseMetadata = new groovy.json.JsonSlurper().parse(file('../../release.json'))
+layout.buildDirectory.set(file(providers.gradleProperty('relaydeckBuildDir').getOrElse('../../.local/android-build/app')))
+android {
+    namespace 'dev.relaydeck.mobile'
+    compileSdk 35
+    buildFeatures { buildConfig true }
+    defaultConfig {
+        applicationId 'dev.relaydeck.mobile'
+        minSdk 28
+        targetSdk 35
+        versionCode releaseMetadata.versionCode
+        versionName releaseMetadata.version
+        ndk { abiFilters 'arm64-v8a' }
+        buildConfigField 'String', 'UPDATE_REPO', '"' + providers.gradleProperty('relaydeckUpdateRepo').getOrElse('') + '"'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    signingConfigs {
+        def signingFile = providers.gradleProperty('relaydeckStoreFile').orNull
+        if (signingFile) {
+            debug {
+                storeFile file(signingFile)
+                storePassword providers.gradleProperty('relaydeckStorePassword').getOrElse('')
+                keyAlias providers.gradleProperty('relaydeckKeyAlias').getOrElse('')
+                keyPassword providers.gradleProperty('relaydeckKeyPassword').getOrElse('')
+            }
+        }
+    }
+    sourceSets.main.jniLibs.srcDirs = ['../../.local/native/easytier']
+    packagingOptions { jniLibs { useLegacyPackaging = true } }
+}
+dependencies {
+    implementation 'com.alphacephei:vosk-android:0.3.75@aar'
+    implementation 'net.java.dev.jna:jna:5.18.1@aar'
+    implementation 'com.google.zxing:core:3.5.4'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    testImplementation 'junit:junit:4.13.2'
+    // Android's JSON implementation preserves its null-to-"null" coercion;
+    // JSON-java has different semantics and hid a real device regression.
+    testImplementation 'com.vaadin.external.google:android-json:0.0.20131108.vaadin1'
+}
+
+

@@ -1,0 +1,11 @@
+{
+  "name": "relaydeck-local",
+  "interface": { "displayName": "RelayDeck 本地插件" },
+  "plugins": [{
+    "name": "relaydeck-desktop",
+    "source": { "source": "local", "path": "./plugins/relaydeck-desktop" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Productivity"
+  }]
+}
+

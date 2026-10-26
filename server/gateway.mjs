@@ -1,0 +1,257 @@
+import https from 'node:https';
+import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { gzip } from 'node:zlib';
+import { promisify } from 'node:util';
+import { mobileStateWindow,prioritizeThreads,boundThreads,SnapshotDigests } from './state-sync.mjs';
+import { findChatFile, readChatFile } from './chat-files.mjs';
+
+const gzipAsync=promisify(gzip);
+const hash = value => createHash('sha256').update(value).digest('hex');
+function fail(status, message) { return Object.assign(new Error(message), { status }); }
+async function body(request) {
+  if (!request.headers['content-type']?.startsWith('application/json')) throw fail(415, '需要 JSON 请求');
+  let size = 0; const chunks = [];
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > 65536) throw fail(413, '请求过大');
+    chunks.push(chunk);
+  }
+  try { const value = JSON.parse(Buffer.concat(chunks)); if (!value || Array.isArray(value) || typeof value !== 'object') throw 0; return value; }
+  catch { throw fail(400, '无效 JSON'); }
+}
+async function reply(response, status, value) {
+  if (response.destroyed || response.writableEnded) return;
+  let bytes = Buffer.from(JSON.stringify(value));
+  const acceptsGzip = String(response.req?.headers['accept-encoding'] || '').split(',').some(part => {
+    const [encoding, ...params] = part.trim().split(';');
+    return encoding === 'gzip' && !params.some(p => /^\s*q\s*=\s*0(?:\.0*)?\s*$/.test(p));
+  });
+  const compressed = acceptsGzip && bytes.length >= 2048;
+  if (compressed) bytes = await gzipAsync(bytes, { level: 1 });
+  if (response.destroyed || response.writableEnded) return;
+  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+    vary: 'Accept-Encoding', 'content-length': bytes.length, ...(compressed ? { 'content-encoding': 'gzip' } : {}) });
+  response.end(bytes);
+}
+
+class ExpiringMap {
+  constructor(limit,ttlMs,now){this.limit=limit;this.ttlMs=ttlMs;this.now=now;this.rows=new Map();}
+  get(key){
+    const row=this.rows.get(key);if(!row)return undefined;
+    if(row.expires<=this.now()){this.rows.delete(key);return undefined;}
+    this.rows.delete(key);this.rows.set(key,row);return row.value;
+  }
+  set(key,value,expires=this.now()+this.ttlMs){
+    this.rows.delete(key);this.rows.set(key,{value,expires});
+    while(this.rows.size>this.limit)this.rows.delete(this.rows.keys().next().value);
+  }
+  prune(){
+    for(const [key,row] of this.rows)if(row.expires<=this.now())this.rows.delete(key);
+  }
+  clear(){this.rows.clear();}
+}
+
+// No generic RPC proxy. Only explicitly configured chats and supported operations.
+export function createGateway({ tls, bridge, desktopVersion = '', deviceName = 'Codex 电脑', deviceId, connectionAddresses = {}, devices = [], saveDevices = async () => {}, pairingCode = randomBytes(16).toString('hex'), pairingTtlMs = 600000, now = Date.now }) {
+  const sessions = new Map(devices.map(device => [device.tokenHash, device]));
+  const syncWindows = new Map();
+  const selections=new Map();
+  let pairingUntil = now() + pairingTtlMs;
+  const attempts = new ExpiringMap(256,60000,now);
+  const idempotency = new ExpiringMap(2000,30*60*1000,now);
+  const locks = new Map();
+  let persistence = Promise.resolve();
+  const mutateSessions = change => {
+    const operation = persistence.catch(() => {}).then(async () => {
+      const previous = new Map(sessions);
+      try { change(); await saveDevices([...sessions.values()]); }
+      catch (error) { sessions.clear(); for (const [key, value] of previous) sessions.set(key, value); throw error; }
+    });
+    persistence = operation;
+    return operation;
+  };
+  let version = 0;
+  const fileReads = new Map(), historyReads = new Map();
+  const waiters = new Map();
+  const digests = new SnapshotDigests();
+  let publishTimer;
+  // Full mobile snapshots are coalesced; never resend the last 50 turns per token.
+  const changed = () => {
+    if (publishTimer) return;
+    publishTimer = setTimeout(() => {
+      publishTimer = null; version++;
+      for (const wake of [...waiters.values()]) wake();
+    }, 250);
+    publishTimer.unref();
+  };
+  bridge.on('changed', changed);
+  const handler = async (request, response) => {
+    try {
+      // Native client only. Prevent browser-origin requests and CSRF pairing.
+      if (request.headers.origin || request.headers['sec-fetch-site']) throw fail(403, '仅允许已配对客户端');
+      const url = new URL(request.url, 'https://localhost');
+      if (request.method === 'GET' && url.pathname === '/v1/info') {
+        await reply(response, 200, { protocol: 1, pairingOpen: now() < pairingUntil }); return;
+      }
+      if (request.method === 'POST' && url.pathname === '/v1/pair') {
+        if (now() >= pairingUntil) throw fail(403, '配对码已过期，请生成新的配对码');
+        const ip = request.socket.remoteAddress;
+        let rate = attempts.get(ip);
+        // Keep the fixed window: refreshing the expiry after every failed
+        // attempt would make the lockout permanent under repeated requests.
+        const expires = rate ? rate.expires : now() + 60000;
+        rate = { count: (rate?.count || 0) + 1, expires };
+        if (rate.count > 5) throw fail(429, '配对尝试过多，请一分钟后重试');
+        attempts.set(ip, rate, expires);
+        const input = await body(request);
+        if (typeof input.code !== 'string' || !timingSafeEqual(Buffer.from(hash(input.code)), Buffer.from(hash(pairingCode)))) throw fail(403, '配对码不正确');
+        const token = randomBytes(32).toString('hex');
+        const device = { tokenHash: hash(token), name: String(input.name || 'Android').slice(0, 60), createdAt: now() };
+        // Persist hashes only. Never log tokens or put them in URLs.
+        try { await mutateSessions(() => {
+          if (sessions.size >= 16) throw fail(409, '设备数量已达上限，请在电脑清理授权');
+          sessions.set(device.tokenHash, device);
+        }); } catch (error) { throw error.status ? error : fail(500, '保存配对失败'); }
+        pairingUntil=0;
+        await reply(response, 200, { token, deviceId, deviceName, protocol: 1, desktopVersion }); return;
+      }
+      const token = request.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
+      const sessionHash = token && hash(token);
+      if (!sessionHash || !sessions.has(sessionHash)) throw fail(401, '请先配对');
+      sessions.get(sessionHash).lastSeen = now();
+      if (request.method === 'GET' && url.pathname === '/v1/file') {
+        const thread=bridge.snapshot().find(thread=>thread.id===url.searchParams.get('threadId'));
+        if(!thread)throw fail(403,'聊天不在授权范围内');
+        const reference=findChatFile(thread,url.searchParams.get('id'));
+        const activeFiles=fileReads.get(sessionHash)||0;
+        if(activeFiles>=2)throw fail(429,'文件正在读取，请稍后重试');
+        fileReads.set(sessionHash,activeFiles+1);
+        try{
+          const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),35000);
+          try{
+            const bytes=await readChatFile(reference,bridge.fileRoot?.(thread.id),{signal:controller.signal});
+            if(!sessions.has(sessionHash))throw fail(401,'设备授权已撤销');
+            if(response.destroyed)return;
+            response.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store','x-content-type-options':'nosniff','content-length':bytes.length});response.end(bytes);return;
+          }finally{clearTimeout(timer);}
+        }catch(error){if(error.name==='AbortError')throw fail(504,'文件读取超时，请稍后重试');throw error;}
+        finally{const count=fileReads.get(sessionHash)||1;if(count<=1)fileReads.delete(sessionHash);else fileReads.set(sessionHash,count-1);}
+      }
+      if (request.method === 'DELETE' && url.pathname === '/v1/session') {
+        try { await mutateSessions(() => sessions.delete(sessionHash)); } catch { throw fail(500, '撤销失败'); }
+        syncWindows.delete(sessionHash);selections.delete(sessionHash);fileReads.delete(sessionHash);historyReads.delete(sessionHash);
+        changed(); await reply(response, 200, { revoked: true }); return;
+      }
+      if (request.method === 'GET' && url.pathname === '/v1/threads') {
+        await reply(response, 200, { threads: await bridge.catalog(),canCreateThreads:!!bridge.allowSelectedChats&&!!bridge.chatCreator }); return;
+      }
+      if(request.method==='POST'&&url.pathname==='/v1/threads/new'){
+        const input=await body(request),id=request.headers['idempotency-key'];
+        if(typeof input.baseThreadId!=='string'||input.name!==undefined&&(typeof input.name!=='string'||input.name.length>80))throw fail(400,'请选择项目，会话名称最多 80 字符');
+        if(typeof id!=='string'||!/^[a-zA-Z0-9-]{16,80}$/.test(id))throw fail(400,'缺少有效操作编号');
+        const key=`${sessionHash}:${id}`,payloadHash=hash(JSON.stringify({operation:'new-thread',...input}));let operation=idempotency.get(key);
+        if(operation&&operation.payloadHash!==payloadHash)throw fail(409,'操作编号已被其他请求使用');
+        if(!operation){operation={payloadHash,promise:Promise.resolve().then(()=>{if(!sessions.has(sessionHash))throw fail(401,'设备授权已撤销');return bridge.createThread(input);})};idempotency.set(key,operation);}
+        try{const created=await operation.promise;selections.set(sessionHash,created.id);await reply(response,200,created);}catch(error){throw fail(error.status||409,error.message);}return;
+      }
+      if (request.method === 'GET' && url.pathname === '/v1/history') {
+        const active=historyReads.get(sessionHash)||0;
+        if(active>=2)throw fail(429,'历史正在同步，请稍后重试');
+        historyReads.set(sessionHash,active+1);
+        try {
+          const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),35000);
+          try{
+            const thread=await bridge.history(url.searchParams.get('threadId'),{signal:controller.signal});
+            if(!sessions.has(sessionHash))throw fail(401,'设备授权已撤销');
+            await reply(response,200,{thread});
+          }finally{clearTimeout(timer);}
+        }
+        catch(error){throw fail(error.name==='AbortError'?504:error.status||403,error.name==='AbortError'?'历史读取超时，请稍后重试':error.message);}
+        finally{const count=historyReads.get(sessionHash)||1;if(count<=1)historyReads.delete(sessionHash);else historyReads.set(sessionHash,count-1);}
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/v1/usage') {
+        await reply(response, 200, await bridge.usage()); return;
+      }
+      if (request.method === 'GET' && url.pathname === '/v1/models') {
+        const threadId=url.searchParams.get('threadId');
+        if(!bridge.snapshot().some(thread=>thread.id===threadId))throw fail(403,'聊天不在授权范围内');
+        try{await reply(response,200,await bridge.modelOptions(threadId));}catch(error){throw fail(400,error.message);}return;
+      }
+      if (request.method === 'POST' && url.pathname === '/v1/select') {
+        const input = await body(request);
+        if (typeof input.threadId !== 'string') throw fail(400, '需要聊天 ID');
+        try { await bridge.openThread(input.threadId); } catch (error) { throw fail(error.code==='THREAD_NOT_FOUND'?404:403, error.message); }
+        selections.set(sessionHash,input.threadId);
+        changed(); await reply(response, 200, { selected: input.threadId }); return;
+      }
+      if (request.method === 'GET' && url.pathname === '/v1/state') {
+        if (url.searchParams.get('after') === String(version) && (url.searchParams.get('delta') !== '1' || syncWindows.has(sessionHash))) {
+          if (waiters.has(sessionHash)) throw fail(429, '此设备已有状态连接');
+          if (waiters.size >= 16) throw fail(429, '连接过多');
+          await new Promise(resolve => {
+            const done = () => { clearTimeout(timer); waiters.delete(sessionHash); response.off('close', done); resolve(); };
+            const timer = setTimeout(done, 20000); waiters.set(sessionHash,done); response.once('close', done);
+          });
+          if(response.destroyed)return;
+        }
+        if (!sessions.has(sessionHash)) throw fail(401, '设备授权已撤销');
+        if (url.searchParams.get('delta') === '1') {
+          const result = mobileStateWindow(boundThreads(prioritizeThreads(bridge.snapshot(),selections.get(sessionHash))), syncWindows.get(sessionHash), version, url.searchParams.get('after'),digests);
+          syncWindows.set(sessionHash, result.baseline);
+          await reply(response, 200, { version, desktopVersion, deviceId, connectionAddresses, ...result.payload });
+        } else await reply(response, 200, { version, desktopVersion, deviceId, connectionAddresses, threads: boundThreads(prioritizeThreads(bridge.snapshot(),selections.get(sessionHash))) });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/v1/command') {
+        const input = await body(request);
+        if (typeof input.threadId !== 'string' || !['start', 'steer', 'queue', 'queue-remove', 'interrupt', 'approve', 'model', 'answer'].includes(input.op)) throw fail(400, '不支持的操作');
+        if (['start', 'steer','queue'].includes(input.op) && (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 16000)) throw fail(400, '消息应为 1–16000 字符');
+        if (!bridge.snapshot().some(thread => thread.id === input.threadId)) throw fail(403, '聊天不在授权范围内');
+        const id = request.headers['idempotency-key'];
+        if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(id)) throw fail(400, '缺少有效操作编号');
+        const key = `${sessionHash}:${id}`;
+        const payloadHash = hash(JSON.stringify(input));
+        let operation = idempotency.get(key);
+        if (operation && operation.payloadHash !== payloadHash) throw fail(409, '操作编号已被其他请求使用');
+        if (!operation) {
+          const prior = locks.get(input.threadId) || Promise.resolve();
+          operation = { payloadHash, promise: prior.catch(() => {}).then(async () => {
+            if (!sessions.has(sessionHash)) throw fail(401, '设备授权已撤销');
+            const action = { at: new Date().toISOString(), deviceName: sessions.get(sessionHash)?.name,
+              threadId: input.threadId, op: input.op, requestId: input.requestId, decision: input.decision };
+            try {
+              const result = await bridge.command(input.threadId, input);
+              server.emit('controlAction', { ...action, ok: true }); return result;
+            } catch (error) { server.emit('controlAction', { ...action, ok: false }); throw error; }
+          }) };
+          idempotency.set(key, operation);
+          locks.set(input.threadId, operation.promise);
+          operation.promise.finally(()=>{if(locks.get(input.threadId)===operation.promise)locks.delete(input.threadId);}).catch(()=>{});
+          // Both success and failure stay cached: an uncertain mutation is not replayed.
+        }
+        try { await reply(response, 200, await operation.promise); }
+        catch (error) { throw fail(error.status || 409, error.message); }
+        return;
+      }
+      throw fail(404, '接口不存在');
+    } catch (error) { await reply(response, error.status || 500, { error: error.status ? error.message : '服务请求失败' }); }
+  };
+  const server = https.createServer({ ...tls, minVersion: 'TLSv1.2', maxHeaderSize: 8192 }, (request,response)=>void handler(request,response));
+  server.requestTimeout = 30000; server.headersTimeout = 10000; server.maxConnections = 40;
+  const maintenance=setInterval(()=>{attempts.prune();idempotency.prune();},60000);maintenance.unref();
+  server.on('close', () => { clearInterval(maintenance);clearTimeout(publishTimer); bridge.off('changed', changed); for (const wake of [...waiters.values()]) wake(); });
+  return {
+    createListener() { return https.createServer({ ...tls, minVersion: 'TLSv1.2', maxHeaderSize: 8192 }, (request,response)=>void handler(request,response)); },
+    server,
+    get pairingCode() { return pairingCode; },
+    get pairingUntil() { return pairingUntil; },
+    rotatePairing() { pairingCode = randomBytes(16).toString('hex'); pairingUntil = now() + pairingTtlMs; attempts.clear(); return { code: pairingCode, expiresAt: pairingUntil }; },
+    listDevices() { return [...sessions.values()].map(device => ({ id: device.tokenHash.slice(0, 24), name: device.name, createdAt: device.createdAt, lastSeen: device.lastSeen, recentlyOnline: !!device.lastSeen && now() - device.lastSeen < 45000 })); },
+    async revokeDevice(id) {
+      const key = [...sessions.keys()].find(key => key.slice(0, 24) === id);
+      if (!key) throw fail(404, '设备不存在');
+      await mutateSessions(() => sessions.delete(key)); syncWindows.delete(key);selections.delete(key); changed(); return { revoked: true };
+    },
+  };
+}

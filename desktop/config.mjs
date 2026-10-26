@@ -1,0 +1,213 @@
+import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { networkInterfaces } from 'node:os';
+import { isIP } from 'node:net';
+import { randomBytes } from 'node:crypto';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+export const run = promisify(execFile);
+export async function atomicJson(path, value) {
+  const temporary = path + '.tmp';
+  await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 }); await rename(temporary, path);
+}
+export async function readJson(path, fallback) {
+  try { return JSON.parse((await readFile(path, 'utf8')).replace(/^\uFEFF/, '')); }
+  catch (error) { if (error.code === 'ENOENT') return fallback; throw error; }
+}
+export function addresses() {
+  return Object.entries(networkInterfaces()).flatMap(([name, rows]) => rows.filter(row => row.family === 'IPv4' && !row.internal && !row.address.startsWith('169.254.')).map(row => ({ name, address: row.address, cidr: row.cidr })));
+}
+export function validateConfig(value) {
+  if (!value || !['existing', 'external', 'bundled', 'relay'].includes(value.mode)) throw Error('请选择局域网、EasyTier 或 Relay 连接');
+  const relay = value.mode === 'relay';
+  const host = relay ? '127.0.0.1' : String(value.host || '').trim();
+  if (!relay && (isIP(host) !== 4 || host === '0.0.0.0' || host.startsWith('127.') || host.startsWith('169.254.'))) throw Error('请输入本机可达的局域网或虚拟 IPv4 地址');
+  if (!relay && value.mode !== 'bundled' && !addresses().some(row => row.address === host)) throw Error('该 IP 不属于本机网卡，请填写电脑的本机地址');
+  const port = Number(value.port);
+  const lanHost=String(value.lanHost || '').trim();
+  if(lanHost && (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(lanHost) || !addresses().some(row=>row.address===lanHost))) throw Error('局域网直连地址必须是本机的私有 IPv4 网卡地址');
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('远控端口应在 1024–65535 之间');
+  const threads = Array.isArray(value.threads) ? value.threads : [];
+  if (threads.length > 24 || threads.some(row => !/^[a-zA-Z0-9_-]{1,128}$/.test(row.id))) throw Error('聊天范围无效');
+  if (!threads.length && !value.allowSelectedChats) throw Error('请选择至少一个允许控制的聊天，或允许手机主动选择本机聊天');
+  const et = value.easytier || {};
+  if (relay && port !== 9443) throw Error('Relay 模式下网关端口固定为 9443');
+  const safe = { mode: value.mode, host, port, lanHost, name: String(value.name || 'Codex 电脑').slice(0, 60),
+    autoStart: value.autoStart === true,
+    codexBinary: String(value.codexBinary || ''), allowSelectedChats: value.allowSelectedChats === true,
+    threads: threads.map(row => ({ id: row.id, name: String(row.name || '桌面聊天').slice(0, 80) })),
+    easytier: { name: String(et.name || '').trim(), cidr: String(et.cidr || '').trim(), peers: Array.isArray(et.peers) ? et.peers : [],
+      listenPort: Number(et.listenPort || 11011), rpcPort: Number(et.rpcPort || 15899), devName: 'relaydeck-et' } };
+  if (safe.mode === 'bundled') validateEasyTier(safe);
+  if (relay) {
+    const local = value.relayLocal === true;
+    if (local) {
+      const publicUrl = relayWebSocketUrl(value.relayPublicUrl || value.relayUrl, true);
+      const publicHost = new URL(publicUrl).hostname;
+      const loopbackPublic = publicHost === '127.0.0.1' || publicHost === 'localhost' || publicHost === '[::1]' || publicHost === '::1';
+      safe.relay = loopbackPublic
+        ? { url:relayWebSocketUrl(value.relayUrl || publicUrl, false), publicUrl, local }
+        : { url:'ws://127.0.0.1:19647/v1/relay', publicUrl, local };
+      if (safe.relay.url !== 'ws://127.0.0.1:19647/v1/relay' && safe.relay.url !== 'wss://127.0.0.1:19647/v1/relay') throw Error('由插件托管 Relay 时，电脑端地址固定为 127.0.0.1:19647；请填写手机公网 WSS 地址');
+    } else {
+      const relayUrl = relayWebSocketUrl(value.relayUrl, false);
+      const publicUrl = relayWebSocketUrl(value.relayPublicUrl || relayUrl, true);
+      safe.relay = { url:relayUrl, publicUrl, local };
+    }
+  }
+  return safe;
+}
+export function relayWebSocketUrl(value, expose) {
+  let url; try { url = new URL(String(value || '').trim()); } catch { throw Error('Relay 地址格式无效'); }
+  if (!['ws:', 'wss:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash) throw Error('Relay 地址必须是无凭据、无查询参数的 ws:// 或 wss:// 地址');
+  if (url.port && (Number(url.port) < 1 || Number(url.port) > 65535)) throw Error('Relay 端口无效');
+  if (!url.pathname || url.pathname === '/') url.pathname = '/v1/relay';
+  const localHost = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]' || url.hostname === '::1';
+  if (url.protocol === 'ws:' && !localHost) throw Error('非本机 Relay 必须使用 wss://；请配置 TLS 终止或 frp 后的 HTTPS 域名');
+  if (expose && url.protocol !== 'wss:') throw Error('手机使用的 Relay 公网地址必须是 wss://');
+  return url.toString();
+}
+export function validateEasyTier(config) {
+  const et = config.easytier;
+  const match = /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/.exec(et.cidr);
+  if (!et.name || et.name.length > 128) throw Error('请填写组网名称，最多 128 字符');
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(et.cidr)) throw Error('电脑虚拟 IP 缺少子网前缀，请填写 IPv4/前缀，例如 192.168.101.1/24');
+  if (!match || isIP(match[1]) !== 4 || +match[2] < 8 || +match[2] > 30 || match[1] !== config.host) throw Error('内置组网需要静态虚拟 IPv4/前缀，且 IP 应与远控地址一致');
+  const ip = ipv4(match[1]), mask = (0xffffffff << (32 - +match[2])) >>> 0;
+  if ((ip & mask) >>> 0 === ip || ((ip | mask) >>> 0) === 0xffffffff || ip >>> 24 === 0 || ip >>> 24 === 127 || ip >>> 24 >= 224) throw Error('虚拟 IP 必须是可分配的主机地址');
+  for (const port of [et.listenPort, et.rpcPort]) if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('EasyTier 端口应在 1024–65535 之间');
+  if (new Set([et.listenPort, et.rpcPort, config.port]).size !== 3) throw Error('EasyTier 监听、管理和远控端口不能重复');
+  if (!Array.isArray(et.peers) || !et.peers.length || et.peers.length > 16) throw Error('请填写 1–16 个组网节点');
+  for (const peer of et.peers) {
+    let url; try { url = new URL(peer); } catch { throw Error('组网节点地址格式无效'); }
+    if (!['tcp:', 'udp:', 'ws:', 'wss:', 'quic:', 'wg:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash) throw Error('请使用无凭据的 EasyTier 节点 URL');
+    if (isIP(url.hostname) === 4 && (ipv4(url.hostname) & mask) === (ip & mask)) throw Error('组网节点应使用底层网络地址，不能填写同一虚拟子网的地址');
+  }
+}
+export function ipv4(address) { return address.split('.').reduce((n, part) => (n * 256 + Number(part)) >>> 0, 0); }
+export function assertNoSubnetConflict(cidr, rows = addresses()) {
+  const [address, prefix] = cidr.split('/'); const ip = ipv4(address), p = +prefix;
+  for (const row of rows) {
+    const [other, otherPrefix] = row.cidr.split('/'); const mask = (0xffffffff << (32 - Math.min(p, +otherPrefix))) >>> 0;
+    if ((ip & mask) === (ipv4(other) & mask)) throw Error(`虚拟子网与已有网卡 ${row.name} 冲突，请修改内置地址或使用已有网络`);
+  }
+}
+export async function protectDirectory(path) {
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  if (process.platform === 'win32') {
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { windowsHide: true });
+    await run('icacls.exe', [path, '/inheritance:r', '/grant:r', `*${stdout.trim()}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F'], { windowsHide: true });
+  }
+}
+async function prepareLocalRelayConfig(root, requestedSecret) {
+  const relayRoot = join(root, 'relay');
+  const path = join(relayRoot, 'relay.local.json');
+  let config = await readJson(path, null);
+  if (config) {
+    if (config.host !== '127.0.0.1' || config.port !== 19647) throw Error('本机 Relay 配置必须监听 127.0.0.1:19647');
+    const existing = typeof config.registrationSecret === 'string' ? config.registrationSecret : '';
+    if (existing && requestedSecret && existing !== requestedSecret)
+      throw Error('本机 Relay 的注册密钥与当前配置不一致；请清除 Relay 密钥后重新填写，或删除本机 Relay 配置');
+    config.registrationSecret = existing || requestedSecret || randomBytes(32).toString('hex');
+    config.adminToken = typeof config.adminToken === 'string' && config.adminToken
+      ? config.adminToken : randomBytes(32).toString('hex');
+    config.dataFile = typeof config.dataFile === 'string' && config.dataFile
+      ? config.dataFile : join(relayRoot, 'relay-devices.local.json');
+    return { path, config, secret:config.registrationSecret, changed:true };
+  }
+  const registrationSecret = requestedSecret || randomBytes(32).toString('hex');
+  config = {
+    host:'127.0.0.1',
+    port:19647,
+    adminToken:randomBytes(32).toString('hex'),
+    registrationSecret,
+    dataFile:join(relayRoot, 'relay-devices.local.json'),
+  };
+  return { path, config, secret:registrationSecret, changed:true };
+}
+async function writeLocalRelayConfig(prepared) {
+  if (!prepared?.changed) return;
+  await mkdir(dirname(prepared.path), { recursive:true, mode:0o700 });
+  await atomicJson(prepared.path, prepared.config);
+}
+// DPAPI input travels via stdin, never command arguments, files, or logs.
+export function dpapi(value, decrypt = false) {
+  if (process.platform !== 'win32') throw Error('此版本的组网密钥存储需要 Windows DPAPI');
+  return new Promise((resolve, reject) => {
+    const script = '[Console]::InputEncoding=[Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); Add-Type -AssemblyName System.Security; $v=[Console]::In.ReadToEnd(); ' + (decrypt
+      ? '$b=[Convert]::FromBase64String($v); [Console]::Write([Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($b,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)))'
+      : '$b=[Text.Encoding]::UTF8.GetBytes($v); [Console]::Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($b,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)))');
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const chunks = []; const timer = setTimeout(() => { child.kill(); reject(Error('Windows 密钥存储超时')); }, 15000);
+    child.stdout.on('data', bytes => chunks.push(bytes)); child.stderr.resume(); child.stdin.on('error', () => {});
+    child.on('error', () => { clearTimeout(timer); reject(Error('无法访问 Windows 密钥存储')); });
+    child.on('exit', code => { clearTimeout(timer); code === 0 ? resolve(Buffer.concat(chunks).toString('utf8')) : reject(Error('Windows 密钥存储失败')); });
+    child.stdin.end(value);
+  });
+}
+export class ConfigStore {
+  constructor(root, { protect = dpapi, unprotect = value => dpapi(value, true) } = {}) {
+    this.root = root;
+    this.path = join(root, 'config.local.json');
+    this.protect = protect;
+    this.unprotect = unprotect;
+  }
+  async load() { return readJson(this.path, null); }
+  async public() {
+    const value = await this.load(); if (!value) return null;
+    const { secretCipher, relayRegistrationSecretCipher, ...config } = value;
+    return { ...config, profiles: networkProfiles(value), hasSecret: !!secretCipher, hasRelaySecret: !!relayRegistrationSecretCipher };
+  }
+  async save(input) {
+    const prior = await this.load();
+    // Modes are independent: editing one must not overwrite another profile's secret.
+    const next = validateConfig({
+      ...input,
+      easytier: input.mode === 'bundled' ? input.easytier : prior?.easytier,
+      relay: input.mode === 'relay' ? input.relay : prior?.relay,
+      lanHost: '',
+    });
+    next.profiles = { ...networkProfiles(prior), [next.mode]: next.mode === 'relay' ? { relay: next.relay } : { host: next.host, port: next.port } };
+    const supplied = next.mode === 'bundled' ? input.networkSecret : undefined;
+    const relaySecretInput = next.mode === 'relay' ? input.relayRegistrationSecret : undefined;
+    let relaySecret = typeof relaySecretInput === 'string' && relaySecretInput.length ? relaySecretInput : undefined;
+    if (supplied !== undefined && (typeof supplied !== 'string' || supplied.length > 512)) throw Error('组网密钥最多 512 字符');
+    if (relaySecretInput !== undefined && (typeof relaySecretInput !== 'string' || relaySecretInput.length > 512)) throw Error('Relay 注册密钥最多 512 字符');
+    let localRelay;
+    if (next.mode === 'relay' && next.relay.local && input.clearRelaySecret !== true) {
+      if (!relaySecret && !prior?.relayRegistrationSecretCipher) {
+        // A fresh local Relay can bootstrap without asking the user to invent
+        // a shared secret. The generated value is encrypted below.
+      } else if (!relaySecret && prior?.relayRegistrationSecretCipher) {
+        const localPath = join(this.root, 'relay', 'relay.local.json');
+        if (!await readJson(localPath, null)) relaySecret = await this.unprotect(prior.relayRegistrationSecretCipher);
+      }
+      localRelay = await prepareLocalRelayConfig(this.root, relaySecret);
+      relaySecret = localRelay.secret;
+    }
+    next.secretCipher = next.mode === 'bundled' && input.clearSecret ? undefined : supplied ? await this.protect(supplied) : prior?.secretCipher;
+    next.relayRegistrationSecretCipher = next.mode === 'relay' && input.clearRelaySecret
+      ? undefined
+      : relaySecret ? await this.protect(relaySecret) : prior?.relayRegistrationSecretCipher;
+    await writeLocalRelayConfig(localRelay);
+    await atomicJson(this.path, next); return this.public();
+  }
+  async relayRegistrationSecret() {
+    const value = await this.load();
+    return value?.relayRegistrationSecretCipher ? this.unprotect(value.relayRegistrationSecretCipher) : '';
+  }
+}
+export function networkProfiles(value) {
+  const profiles = {};
+  for (const mode of ['existing', 'external', 'bundled', 'relay']) {
+    const row = value?.profiles?.[mode];
+    if (mode === 'relay') {
+      if (row?.relay && typeof row.relay.url === 'string' && typeof row.relay.publicUrl === 'string') profiles.relay = structuredClone(row.relay);
+      continue;
+    }
+    if (row && typeof row.host === 'string' && Number.isInteger(row.port)) profiles[mode] = { host: row.host, port: row.port };
+  }
+  if (value?.host && ['existing','external','bundled'].includes(value.mode)) profiles[value.mode] = { host:value.host, port:value.port };
+  if (value?.mode === 'relay' && value.relay) profiles.relay = structuredClone(value.relay);
+  return profiles;
+}

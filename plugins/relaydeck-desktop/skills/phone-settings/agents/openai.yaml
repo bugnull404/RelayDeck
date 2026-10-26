@@ -1,0 +1,4 @@
+interface:
+  display_name: "RelayDeck 手机连接设置"
+  short_description: "在 Codex 内打开手机连接、组网、配对与设备授权设置"
+  default_prompt: "使用 $phone-settings 在当前 Codex 聊天右侧打开手机连接设置。"

@@ -1,0 +1,24 @@
+name: Update release introduction
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing preview release tag
+        default: v0.1.0
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Put checksums in release introduction
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELAYDECK_RELEASE_TAG: ${{ inputs.tag }}
+        run: node scripts/update-release-notes.mjs
+
+
