@@ -32,7 +32,21 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK command-line tools
+        shell: pwsh
+        run: |
+          $sdk = Join-Path $env:RUNNER_TEMP 'android-sdk'
+          $archive = Join-Path $env:RUNNER_TEMP 'commandlinetools.zip'
+          New-Item -ItemType Directory -Path $sdk -Force | Out-Null
+          Invoke-WebRequest 'https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip' -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $env:RUNNER_TEMP 'commandlinetools') -Force
+          $bin = Join-Path $env:RUNNER_TEMP 'commandlinetools/cmdline-tools/bin'
+          $env:ANDROID_SDK_ROOT = $sdk
+          & (Join-Path $bin 'sdkmanager.bat') --sdk_root=$sdk --licenses | Out-Null
+          & (Join-Path $bin 'sdkmanager.bat') --sdk_root=$sdk 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
+          "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
       - name: Install dependencies and verify release metadata
         shell: pwsh
         run: |
