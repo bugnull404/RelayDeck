@@ -12,10 +12,10 @@ if (version !== release.version) throw Error(`Release tag ${tag} does not match 
 const repo = process.env.GH_REPO || process.env.GITHUB_REPOSITORY;
 if (!repo) throw Error('Set GH_REPO or GITHUB_REPOSITORY');
 const gh = args => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-const release = JSON.parse(gh(['api', `repos/${repo}/releases/tags/${tag}`]));
+const remoteRelease = JSON.parse(gh(['api', `repos/${repo}/releases/tags/${tag}`]));
 const rows = [];
 for (const name of [`relaydeck-desktop-${version}.zip`, `relaydeck-${version}.apk`]) {
-  const asset = release.assets.find(row => row.name === name);
+  const asset = remoteRelease.assets.find(row => row.name === name);
   if (!asset) continue;
   let digest = asset.digest?.match(/^sha256:([a-f0-9]{64})$/i)?.[1];
   if (!digest) {
@@ -35,6 +35,6 @@ await writeFile(file, notes);
 gh(['release', 'edit', tag, '--repo', repo, '--notes-file', file]);
 // Remove only the two obsolete checksum downloads explicitly requested by the owner.
 for (const name of ['SHA256SUMS.txt', 'SHA256SUMS-android.txt']) {
-  if (release.assets.some(row => row.name === name)) gh(['release', 'delete-asset', tag, name, '--repo', repo, '--yes']);
+  if (remoteRelease.assets.some(row => row.name === name)) gh(['release', 'delete-asset', tag, name, '--repo', repo, '--yes']);
 }
 console.log('Release introduction updated; installer packages retained.');
