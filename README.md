@@ -8,7 +8,7 @@ RelayDeck 是一个独立的 Android + Windows 远程协作工具，用手机继
 - **RelayDeck Desktop**：Windows 端 Codex 插件与后台服务。
 - **RelayDeck Relay**：可选的自托管 WSS 中转服务，适合手机与电脑不在同一网络的场景。
 
-RelayDeck 从 `0.1.0` 开始独立发布，当前版本为 `0.1.3`，拥有自己的包名、插件 ID、数据目录、升级配置和配对数据。
+RelayDeck 从 `0.1.0` 开始独立发布，当前版本为 `0.1.5`，拥有自己的包名、插件 ID、数据目录、升级配置和配对数据。
 
 ## 连接方式
 
@@ -31,7 +31,9 @@ Relay 只处理路由、密文和短生命周期票据。手机与电脑之间�
 ## 功能
 
 - 会话列表、历史消息、工具调用与任务状态同步
-- 新建会话、发送消息、追加指令、排队消息和中断任务
+- Codex 工作会话与 ChatGPT 引用到 Codex 的会话会分别标出；普通 ChatGPT Chat 原会话不在 Codex thread 列表中，暂不能通过官方接口同步
+- 新建 Codex 本地对话、发送消息、追加指令、中断任务，以及工作会话的桌面排队消息
+- 主界面、会话侧栏与设置页采用 ChatGPT 风格的浅色原生界面，使用自绘图标与系统字体，不打包官方客户端资源
 - 审批操作、问题卡片、完成与待处理通知
 - 图片、文本、Markdown、PDF 与常用 Office 文件预览
 - 本地离线中文语音输入
@@ -153,6 +155,8 @@ npm test
 - [角色素材导入](docs/角色素材导入.md)
 - [EasyTier 集成](docs/EasyTier参考.md)
 - [接口验证](docs/接口验证.md)
+- [Codex 本地对话](docs/Codex本地对话.md)
+- [普通 ChatGPT Chat 同步验证](docs/Chat同步验证.md)
 
 ## 角色素材
 

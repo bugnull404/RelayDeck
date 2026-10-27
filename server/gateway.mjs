@@ -143,7 +143,11 @@ export function createGateway({ tls, bridge, desktopVersion = '', deviceName = '
         changed(); await reply(response, 200, { revoked: true }); return;
       }
       if (request.method === 'GET' && url.pathname === '/v1/threads') {
-        await reply(response, 200, { threads: await bridge.catalog(),canCreateThreads:!!bridge.allowSelectedChats&&!!bridge.chatCreator }); return;
+        await reply(response, 200, {
+          threads: await bridge.catalog(),
+          canCreateThreads: !!bridge.allowSelectedChats && !!bridge.chatCreator,
+          canCreateLocalChats: !!bridge.createLocalChat,
+        }); return;
       }
       if(request.method==='POST'&&url.pathname==='/v1/threads/new'){
         const input=await body(request),id=request.headers['idempotency-key'];
@@ -153,6 +157,37 @@ export function createGateway({ tls, bridge, desktopVersion = '', deviceName = '
         if(operation&&operation.payloadHash!==payloadHash)throw fail(409,'操作编号已被其他请求使用');
         if(!operation){operation={payloadHash,promise:Promise.resolve().then(()=>{if(!sessions.has(sessionHash))throw fail(401,'设备授权已撤销');return bridge.createThread(input);})};idempotency.set(key,operation);}
         try{const created=await operation.promise;selections.set(sessionHash,created.id);await reply(response,200,created);}catch(error){throw fail(error.status||409,error.message);}return;
+      }
+      if (request.method === 'POST' && url.pathname === '/v1/chats/new') {
+        const input = await body(request), id = request.headers['idempotency-key'];
+        if (typeof bridge.createLocalChat !== 'function') throw fail(403, '电脑端未开启 Codex 本地对话');
+        if (typeof input.baseThreadId !== 'string' || !input.baseThreadId ||
+          input.name !== undefined && (typeof input.name !== 'string' || input.name.length > 80) ||
+          input.model !== undefined && (typeof input.model !== 'string' || input.model.length > 120)) {
+          throw fail(400, '请选择项目，会话名称最多 80 字符');
+        }
+        if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(id)) throw fail(400, '缺少有效操作编号');
+        const key = `${sessionHash}:${id}`;
+        const payloadHash = hash(JSON.stringify({operation:'new-local-chat',...input}));
+        let operation = idempotency.get(key);
+        if (operation && operation.payloadHash !== payloadHash) throw fail(409, '操作编号已被其他请求使用');
+        if (!operation) {
+          operation = { payloadHash, promise: Promise.resolve().then(async () => {
+            if (!sessions.has(sessionHash)) throw fail(401, '设备授权已撤销');
+            const created = await bridge.createLocalChat(input);
+            if (!created?.id) throw fail(500, '电脑端未返回新会话');
+            return created;
+          }) };
+          idempotency.set(key, operation);
+        }
+        try {
+          const created = await operation.promise;
+          selections.set(sessionHash, created.id);
+          await reply(response, 200, created);
+        } catch (error) {
+          throw fail(error.status || 409, error.message);
+        }
+        return;
       }
       if (request.method === 'GET' && url.pathname === '/v1/history') {
         const active=historyReads.get(sessionHash)||0;

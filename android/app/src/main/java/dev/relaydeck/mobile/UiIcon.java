@@ -28,6 +28,17 @@ final class UiIcon extends Drawable {
             case "bolt": line(canvas,13,3,5,13); line(canvas,5,13,11,13); line(canvas,11,13,9,21); line(canvas,9,21,19,10); line(canvas,19,10,13,10); line(canvas,13,10,13,3); break;
             case "reset": canvas.drawArc(4,4,20,20,-145,310,false,paint); line(canvas,4,4,4,10); line(canvas,4,10,10,10); break;
             case "menu": line(canvas,4,7,20,7); line(canvas,4,12,16,12); line(canvas,4,17,20,17); break;
+            case "account": canvas.drawCircle(12,12,9,paint); line(canvas,8.5f,10,15.5f,10); line(canvas,8.5f,14,15.5f,14); break;
+            case "edit": Path pencil=new Path();pencil.moveTo(5,19);pencil.lineTo(6,14);pencil.lineTo(15,5);pencil.lineTo(19,9);pencil.lineTo(10,18);pencil.close();canvas.drawPath(pencil,paint);line(canvas,13.5f,6.5f,17.5f,10.5f);line(canvas,6,14,10,18);break;
+            case "globe": canvas.drawCircle(12,12,9,paint);line(canvas,3,12,21,12);canvas.drawOval(7,3,17,21,paint);break;
+            case "library": line(canvas,5,4,5,20);line(canvas,9,4,9,20);line(canvas,14,5,19,19);line(canvas,18,4,14,20);break;
+            case "projects": Path projects=new Path();projects.moveTo(3,8);projects.lineTo(3,6);projects.quadTo(3,4,5,4);projects.lineTo(10,4);projects.lineTo(12,7);projects.lineTo(20,7);projects.quadTo(22,7,22,9);projects.lineTo(21,19);projects.lineTo(3,19);projects.close();canvas.drawPath(projects,paint);line(canvas,3,10,21,10);break;
+            case "tasks": canvas.drawCircle(12,12,9,paint);line(canvas,12,7,12,12);line(canvas,12,12,16,14);break;
+            case "grid": canvas.drawRoundRect(3,3,10,10,2,2,paint);canvas.drawRoundRect(14,3,21,10,2,2,paint);canvas.drawRoundRect(3,14,10,21,2,2,paint);canvas.drawRoundRect(14,14,21,21,2,2,paint);break;
+            case "sparkle": line(canvas,12,3,12,21);line(canvas,3,12,21,12);line(canvas,6,6,18,18);line(canvas,18,6,6,18);break;
+            case "chevron-right": line(canvas,9,5,16,12);line(canvas,16,12,9,19);break;
+            case "chevron-down": line(canvas,5,9,12,16);line(canvas,12,16,19,9);break;
+            case "codex": Path codex=new Path();codex.moveTo(7,5);codex.quadTo(12,2,17,5);codex.quadTo(22,8,19,14);codex.quadTo(17,20,12,21);codex.quadTo(7,20,5,14);codex.quadTo(2,8,7,5);canvas.drawPath(codex,paint);line(canvas,8,9,12,12);line(canvas,12,12,16,9);line(canvas,9,15,15,15);break;
             case "send": line(canvas,12,19,12,5); line(canvas,6,11,12,5); line(canvas,12,5,18,11); break;
             case "stop": canvas.drawRoundRect(6,6,18,18,2,2,paint); break;
             case "back": line(canvas,19,12,5,12); line(canvas,5,12,11,6); line(canvas,5,12,11,18); break;

@@ -98,6 +98,13 @@ public class MobileStateTest {
         thread.put("queueSupported",false);assertEquals("none",MobileState.composerAction(current,thread,false,"next","queue"));
         thread.getJSONArray("turns").getJSONObject(0).put("status","completed");assertEquals("start",MobileState.composerAction(current,thread,false,"first","steer"));
     }
+    @Test public void codexChatsUseSteerEvenWhenTheSavedPreferenceIsQueue()throws Exception{
+        JSONObject current=state("inProgress","",true).put("online",true),thread=current.getJSONArray("threads").getJSONObject(0);
+        thread.put("mode","codex-chat").put("queueSupported",false);
+        assertEquals("steer",MobileState.composerAction(current,thread,false,"next","queue"));
+        thread.getJSONArray("turns").getJSONObject(0).put("status","completed");
+        assertEquals("start",MobileState.composerAction(current,thread,false,"first","queue"));
+    }
     @Test public void markdownTablesAreStructuredAndRespectCodeAndEscapedPipes(){
         String text="说明\n\n| 项目 | 状态 |\n| :--- | ---: |\n| **同步** | `a|b` |\n| 文件 \\| 图片 | 完成 |\n\n```md\n| raw | pipes |\n| --- | --- |\n```";
         java.util.List<MarkdownContent.Block> blocks=MarkdownContent.blocks(text);assertEquals(3,blocks.size());MarkdownContent.Block table=blocks.get(1);assertEquals("table",table.kind);assertEquals(3,table.rows.size());assertEquals("`a|b`",table.rows.get(1).get(1));assertEquals("文件 | 图片",table.rows.get(2).get(0));assertEquals("right",table.align.get(1));assertEquals("code",blocks.get(2).kind);
@@ -140,6 +147,13 @@ public class MobileStateTest {
         JSONObject current=state("inProgress","",true),thread=current.getJSONArray("threads").getJSONObject(0);thread.put("metadataOnly",true);
         JSONObject stored=new JSONObject(thread.toString());stored.put("ready",false).getJSONArray("turns").getJSONObject(0).put("status","completed").put("input","stored content");
         JSONObject merged=MobileState.mergeHistory(current,stored).getJSONArray("threads").getJSONObject(0);assertTrue(merged.getBoolean("ready"));assertEquals("inProgress",merged.getJSONArray("turns").getJSONObject(0).getString("status"));assertEquals("stored content",merged.getJSONArray("turns").getJSONObject(0).getString("input"));
+    }
+    @Test public void historyMergeRetainsChatHandoffCatalogLabel()throws Exception{
+        JSONObject current=state("inProgress","",true),thread=current.getJSONArray("threads").getJSONObject(0);
+        thread.put("mode","chat-handoff").put("groupId","project:p").put("groupName","Research");
+        JSONObject stored=new JSONObject(thread.toString()).put("ready",false).put("mode","work").put("groupId","chats");
+        JSONObject merged=MobileState.mergeHistory(current,stored).getJSONArray("threads").getJSONObject(0);
+        assertEquals("chat-handoff",merged.getString("mode"));assertEquals("project:p",merged.getString("groupId"));assertEquals("Research",merged.getString("groupName"));
     }
     @Test public void fileCitationsNeverLeakDirectiveMarkupIntoMessageBubbles(){
         assertEquals("已完成。",ChatRows.displayText("已完成。\n:codex-file-citation{path=\"C:\\Temp\\报告.docx\" purpose=\"output\"}"));

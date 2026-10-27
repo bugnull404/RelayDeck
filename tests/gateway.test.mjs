@@ -32,6 +32,7 @@ class FakeBridge extends EventEmitter {
   async catalog() { return [{ id: 'allowed-chat', name: 'Test chat' }]; }
   async openThread(id) { if (id !== 'allowed-chat') throw Error('Unknown chat'); }
   async modelOptions(){return {models:[{model:'available',efforts:['high']}],current:{model:'available',effort:'high'}};}
+  async threadDirectory(id){return id==='allowed-chat'?'C:\\project':'';}
   async command(id, command) { this.count++; await new Promise(resolve => setTimeout(resolve, 20)); return { accepted: true, text: command.text }; }
 }
 
@@ -55,6 +56,31 @@ test('desktop style new chat does not require a title',async t=>{
   const f=await fixture(t);let received;f.bridge.createThread=async input=>{received=input;return{id:'new',name:'新聊天'};};
   const token=await f.pair();const response=await f.request('POST','/v1/threads/new',{baseThreadId:'allowed-chat'},{authorization:'Bearer '+token,'idempotency-key':'untitled-chat-request-001'});
   assert.equal(response.status,200);assert.equal(received.name,undefined);assert.equal(response.data.name,'新聊天');
+});
+test('local Codex chat creation is paired, idempotent and advertises its capability',async t=>{
+  const f=await fixture(t);let calls=0,received;
+  f.bridge.createLocalChat=async input=>{calls++;received=input;await new Promise(resolve=>setTimeout(resolve,15));return{id:'local-chat',name:'对话',mode:'codex-chat'};};
+  const body={baseThreadId:'allowed-chat',name:'对话'},key='new-local-chat-00001';
+  assert.equal((await f.request('POST','/v1/chats/new',body,{'idempotency-key':key})).status,401);
+  const token=await f.pair(),headers={authorization:`Bearer ${token}`,'idempotency-key':key};
+  const catalog=await f.request('GET','/v1/threads',undefined,headers);
+  assert.equal(catalog.data.canCreateLocalChats,true);
+  const responses=await Promise.all([f.request('POST','/v1/chats/new',body,headers),f.request('POST','/v1/chats/new',body,headers)]);
+  assert.deepEqual(responses.map(row=>row.status),[200,200]);assert.equal(calls,1);
+  assert.deepEqual(received,body);assert.equal(responses[0].data.mode,'codex-chat');
+  assert.equal((await f.request('POST','/v1/chats/new',{...body,name:'other'},headers)).status,409);
+  assert.equal(calls,1);
+});
+test('disabled or invalid local chat creation returns explicit errors',async t=>{
+  const f=await fixture(t),token=await f.pair();
+  const headers={authorization:`Bearer ${token}`,'idempotency-key':'new-local-chat-00002'};
+  assert.equal((await f.request('POST','/v1/chats/new',{baseThreadId:'allowed-chat'},headers)).status,403);
+  f.bridge.createLocalChat=async()=>({id:'local-chat'});
+  const invalid=await f.request('POST','/v1/chats/new',{baseThreadId:'../private'},{...headers,'idempotency-key':'new-local-chat-00005'});
+  assert.equal(invalid.status,200);
+  assert.equal((await f.request('POST','/v1/chats/new',{baseThreadId:'allowed-chat',name:'x'.repeat(81)},{...headers,'idempotency-key':'new-local-chat-00003'})).status,400);
+  assert.equal((await f.request('POST','/v1/chats/new',{baseThreadId:'allowed-chat',model:123},{...headers,'idempotency-key':'new-local-chat-00004'})).status,400);
+  assert.equal((await f.request('GET','/v1/threads',undefined,{authorization:`Bearer ${token}`})).data.canCreateLocalChats,true);
 });
 test('installed desktop version is advertised separately from sync revision',async t=>{
   const f=await fixture(t,{desktopVersion:'0.2.0'});const info=await f.request('GET','/v1/info');assert.equal(info.data.desktopVersion,undefined);assert.equal(info.data.deviceId,undefined);const token=await f.pair();const state=await f.request('GET','/v1/state',undefined,{authorization:'Bearer '+token});assert.equal(state.data.desktopVersion,'0.2.0');assert.equal(typeof state.data.version,'number');

@@ -34,6 +34,7 @@ if (-not $SdkPath) {
         'D:\Program Files\Android\SDK'
     ) 'platforms\android-35\android.jar'
 }
+$SdkPath = [System.IO.Path]::GetFullPath($SdkPath)
 if (-not $JavaPath) {
     $taskJdks = @(Get-ChildItem -LiteralPath (Join-Path $taskRoot '.local\toolchain\jdk17') -Directory -ErrorAction SilentlyContinue)
     $taskJavaCandidates = @($taskJdks.FullName) + @(

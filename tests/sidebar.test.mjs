@@ -28,3 +28,9 @@ test('desktop pin order wins over recency and project placement',async()=>{
   reader.request=async(_method,params)=>params.sectionId?{data:[{id:'b'},{id:'a'}]}:{data:[{id:'a',name:'A',updatedAt:50},{id:'b',name:'B',updatedAt:10},{id:'c',name:'C',updatedAt:100}]};
   const rows=await reader.list();assert.deepEqual(rows.map(r=>r.id),['b','a','c']);assert.equal(rows[0].groupName,'置顶');assert.equal(rows[0].pinned,true);
 });
+test('marks only ChatGPT handoff work threads without exposing raw source metadata',()=>{
+  const rows=groupThreads([{id:'handoff',threadSource:'chatgpt_handoff',source:{type:'vscode'},originator:'private'},{id:'work',threadSource:'user'}],{});
+  assert.equal(rows.find(row=>row.id==='handoff').mode,'chat-handoff');
+  assert.equal(rows.find(row=>row.id==='work').mode,'work');
+  assert.equal(rows.some(row=>'source' in row||'originator' in row||'threadSource' in row),false);
+});

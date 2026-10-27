@@ -62,6 +62,22 @@ export class DesktopBridge extends EventEmitter {
   async usage() {
     return this.historyReader?.usage ? this.historyReader.usage() : {available:false,primary:null,secondary:null,updatedAt:null,stale:true};
   }
+  async models() {
+    if (!this.historyReader?.models) throw Error('当前桌面版本不支持模型列表');
+    if (!this.modelCatalog || Date.now() - this.modelCatalogAt > 60000) {
+      this.modelCatalog = await this.historyReader.models();
+      this.modelCatalogAt = Date.now();
+    }
+    return this.modelCatalog;
+  }
+  async threadDirectory(threadId) {
+    const live = this.entries.get(threadId)?.store.state?.cwd;
+    if (live) return live;
+    if (!this.historyReader?.threadDirectories) {
+      try { await this.catalog(); } catch {}
+    }
+    return this.historyReader?.threadDirectories?.get(threadId) || this.catalogRows.find(row => row.id === threadId)?.cwd || '';
+  }
   async createThread({baseThreadId,name}){
     if(!this.allowSelectedChats||!this.chatCreator)throw Error('请先在电脑允许手机选择和新建会话');
     const base=(await this.catalog()).find(row=>row.id===baseThreadId);if(!base)throw Error('请先选择一个已有会话作为新会话的项目');
@@ -280,12 +296,9 @@ export class DesktopBridge extends EventEmitter {
   async modelOptions(threadId){
     const entry=this.entries.get(threadId);
     if(!entry?.ready)throw Error('桌面聊天尚未就绪');
-    if(!this.modelCatalog || Date.now()-this.modelCatalogAt>60000){
-      if(!this.historyReader?.models)throw Error('当前桌面版本不支持模型列表');
-      this.modelCatalog=await this.historyReader.models();this.modelCatalogAt=Date.now();
-    }
+    const models=await this.models();
     entry.modelSettings=await this.client.readModelSettings(threadId,entry.owner);
-    return {models:this.modelCatalog,current:{model:entry.modelSettings?.model||'',effort:entry.modelSettings?.reasoningEffort||'',serviceTier:entry.store.state?.latestThreadSettings?.serviceTier??'default'}};
+    return {models,current:{model:entry.modelSettings?.model||'',effort:entry.modelSettings?.reasoningEffort||'',serviceTier:entry.store.state?.latestThreadSettings?.serviceTier??'default'}};
   }
   close() { this.closed = true; ++this.generation; clearTimeout(this.reconnectTimer); clearInterval(this.refreshTimer);for(const entry of this.entries.values())clearTimeout(entry.repairTimer);this.client?.close(); this.historyReader?.close();if(this.backgroundHistoryReader!==this.historyReader)this.backgroundHistoryReader?.close(); }
 }

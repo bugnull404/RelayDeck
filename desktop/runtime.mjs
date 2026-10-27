@@ -6,6 +6,8 @@ import { mkdir, readFile, appendFile } from 'node:fs/promises';
 import { DesktopBridge } from '../server/desktop-bridge.mjs';
 import { HistoryReader } from '../server/history-reader.mjs';
 import { ChatCreator } from '../server/chat-creator.mjs';
+import { LocalChatRuntime } from '../server/local-chat.mjs';
+import { ChatRuntime } from '../server/chat-runtime.mjs';
 import { createGateway } from '../server/gateway.mjs';
 import { atomicJson, readJson, addresses, dpapi } from './config.mjs';
 import { createRelayServer } from '../relay/server.mjs';
@@ -66,17 +68,24 @@ export class GatewayRuntime {
     const devices = await readJson(devicesPath, []);
     const historyReader = config.codexBinary ? new HistoryReader(config.codexBinary) : undefined;
     const bridge = new DesktopBridge(config.threads, { historyReader,backgroundHistoryReader:config.codexBinary?new HistoryReader(config.codexBinary):undefined, allowSelectedChats: config.allowSelectedChats,chatCreator:config.codexBinary?new ChatCreator(config.codexBinary):undefined });
+    const localChat = config.codexBinary ? new LocalChatRuntime(config.codexBinary, {
+      registryPath: join(this.root, 'chats.local.json'),
+      writable: config.allowSelectedChats === true,
+      models: () => historyReader?.models?.() || Promise.resolve([]),
+    }) : undefined;
+    if (localChat) await localChat.load();
+    const chatRuntime = new ChatRuntime(bridge, localChat);
     const connectionAddresses = relay
       ? { primary:config.relay.publicUrl, relay:config.relay.publicUrl }
       : { primary:`https://${config.host}:${config.port}`, ...(config.lanHost ? {lan:`https://${config.lanHost}:${config.port}`} : {}) };
-    const gateway = createGateway({ tls: this.tls, bridge, desktopVersion, deviceId: this.identity.deviceId, deviceName: config.name, connectionAddresses, devices, saveDevices: value => atomicJson(devicesPath, value) });
+    const gateway = createGateway({ tls: this.tls, bridge: chatRuntime, desktopVersion, deviceId: this.identity.deviceId, deviceName: config.name, connectionAddresses, devices, saveDevices: value => atomicJson(devicesPath, value) });
     const servers=[gateway.server];
     gateway.server.on('controlAction', event => { void appendFile(join(this.root, 'actions.local.jsonl'), JSON.stringify(event) + '\n', { mode: 0o600 }).catch(() => {}); });
     try {
       await new Promise((resolve, reject) => { gateway.server.once('error', reject); gateway.server.listen(config.port, config.host, resolve); });
       if(config.lanHost && config.lanHost!==config.host){const lan=gateway.createListener();servers.push(lan);await new Promise((resolve,reject)=>{lan.once('error',reject);lan.listen(config.port,config.lanHost,resolve);});}
     } catch (error) {
-      bridge.close();
+      chatRuntime.close();
       for (const server of servers) { server.closeAllConnections(); server.close(); }
       const detail = error.code === 'EADDRINUSE'
         ? `端口 ${config.host}:${config.port} 已被其他程序占用，请改用其他端口`
@@ -108,13 +117,13 @@ export class GatewayRuntime {
           if (!relayAgent.status().connected && relayAgent.status().state !== 'reconnecting') throw Error(relayAgent.status().error || '无法连接 Relay');
         }
       } catch (error) {
-        bridge.close();
+        chatRuntime.close();
         for(const server of servers){server.closeAllConnections();server.close();}
         throw error;
       }
     }
-    void bridge.connect();
-    return { config, gateway, bridge, servers, relayAgent };
+    void chatRuntime.connect();
+    return { config, gateway, bridge: chatRuntime, desktopBridge: bridge, localChat, servers, relayAgent };
   }
   async start(config) {
     if (!this.identity) await this.prepareIdentity();

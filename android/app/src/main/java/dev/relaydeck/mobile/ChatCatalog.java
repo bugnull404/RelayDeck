@@ -10,7 +10,7 @@ final class ChatCatalog {
             JSONArray source=state.optJSONArray(key);if(source==null)continue;
             for(int i=0;i<source.length();i++){
                 JSONObject next=source.getJSONObject(i);String id=next.getString("id");JSONObject row=rows.get(id);
-                if(row==null){row=new JSONObject(next.toString());rows.put(id,row);}else for(String field:new String[]{"name","ready","historyReady"})if(next.has(field))row.put(field,next.get(field));
+                if(row==null){row=new JSONObject(next.toString());rows.put(id,row);}else for(String field:new String[]{"name","ready","historyReady","mode","runtime","localOnly","queueSupported","groupOrder","order","updatedAt"})if(next.has(field))row.put(field,next.get(field));
             }
         }
         ArrayList<JSONObject> result=new ArrayList<>(rows.values());
