@@ -20,6 +20,7 @@
 - 会话登记只保存 thread ID、标题、工作目录、分组和模型设置，不保存消息正文、Cookie、JWT 或账号令牌。
 - 同一 thread 若正在电脑端使用，RelayDeck 返回明确的 writer 冲突，不强制抢占 Codex writer lock。
 - 修复 Relay 与 Gateway 同端口切换、握手会话编号和受控流清理问题。
+- 修复设置页在插件重装、后台重启或 Codex 重开面板后丢失临时授权的问题：每次入口使用一次性票据换取 HttpOnly `SameSite=Strict` 会话 Cookie，不再把管理员令牌保存在 `sessionStorage`；直接打开裸本机端口会显示明确的重新打开提示。
 
 ## 安装
 
@@ -30,6 +31,7 @@
 
 - Android APK 实际构建成功，JVM 测试 79/79 通过。
 - Node 测试 121/121 通过。
+- 设置入口一次性票据、HttpOnly 浏览器会话和裸地址拒绝均有回归测试，并通过安装后 MCP 入口实测。
 - 发布元数据校验通过，桌面端与 Android 端版本均为 `0.1.5`，`versionCode 6`。
 - Android 真机视觉验收、公网 Relay/VPS 和跨运营商网络仍需单独验收。
 

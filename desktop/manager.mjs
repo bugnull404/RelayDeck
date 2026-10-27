@@ -14,6 +14,37 @@ const safeEqual = (a, b) => typeof a === 'string' && a.length === b.length && ti
 export async function createManager({ root, assets, binDir, port = 29647, runtime = new GatewayRuntime(root), easytier = new EasyTierManager(binDir, { dataDir: join(root, 'easytier') }), store = new ConfigStore(root), token = randomBytes(32).toString('hex'), onShutdown = () => {}, syncAutoStart = async () => {}, restoreDelays = [1000, 3000, 10000, 30000] }) {
   let mutation = Promise.resolve(); const events = [];
   let restoreTimer, restoreGeneration = 0, closed = false;
+  const browserTickets = new Map();
+  const browserSessions = new Map();
+  const TICKET_TTL = 60_000, SESSION_TTL = 12 * 60 * 60_000;
+  const createBrowserUrl = () => {
+    const ticket = randomBytes(32).toString('hex');
+    browserTickets.set(ticket, Date.now() + TICKET_TTL);
+    return `http://127.0.0.1:${server.address().port}/#${ticket}`;
+  };
+  const browserSession = request => {
+    const header = request.headers.cookie || '';
+    const match = /(?:^|;\s*)relaydeck_session=([a-f0-9]{64})(?:;|$)/.exec(header);
+    if (!match) return false;
+    const expiresAt = browserSessions.get(match[1]);
+    if (expiresAt && expiresAt > Date.now()) return true;
+    browserSessions.delete(match[1]); return false;
+  };
+  const setBrowserSession = response => {
+    const session = randomBytes(32).toString('hex');
+    browserSessions.set(session, Date.now() + SESSION_TTL);
+    response.setHeader('set-cookie', `relaydeck_session=${session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL / 1000}`);
+  };
+  const consumeBrowserTicket = ticket => {
+    const expiresAt = browserTickets.get(ticket);
+    if (!expiresAt || expiresAt <= Date.now()) { browserTickets.delete(ticket); return false; }
+    browserTickets.delete(ticket); return true;
+  };
+  const purgeBrowserAuth = () => {
+    const now = Date.now();
+    for (const [ticket, expiresAt] of browserTickets) if (expiresAt <= now) browserTickets.delete(ticket);
+    for (const [session, expiresAt] of browserSessions) if (expiresAt <= now) browserSessions.delete(session);
+  };
   let recovery = { state: 'idle', attempts: 0, nextRetryAt: null };
   const cancelRestore = () => { ++restoreGeneration; clearTimeout(restoreTimer); restoreTimer = null; recovery = { state: 'idle', attempts: 0, nextRetryAt: null }; };
   const enqueue = operation => { const pending = mutation.catch(() => {}).then(operation); mutation = pending; return pending; };
@@ -90,7 +121,18 @@ export async function createManager({ root, assets, binDir, port = 29647, runtim
         const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
         reply(200, await readFile(join(assets, name), 'utf8'), name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8'); return;
       }
-      if (!safeEqual(request.headers.authorization || '', 'Bearer ' + token)) throw fail(401, '请通过插件入口重新打开设置页面');
+      if (request.method === 'POST' && url.pathname === '/api/session') {
+        if (!request.headers['content-type']?.startsWith('application/json')) throw fail(415, '需要 JSON 请求');
+        let size = 0; const chunks = [];
+        for await (const chunk of request) { size += chunk.length; if (size > 4096) throw fail(413, '请求过大'); chunks.push(chunk); }
+        let input; try { input = JSON.parse(Buffer.concat(chunks)); } catch { throw fail(400, '请求格式无效'); }
+        if (!input || typeof input.ticket !== 'string' || !consumeBrowserTicket(input.ticket)) throw fail(401, '设置入口已失效，请从插件入口重新打开');
+        purgeBrowserAuth(); setBrowserSession(response); reply(200, { ok: true }); return;
+      }
+      const bearer = safeEqual(request.headers.authorization || '', 'Bearer ' + token);
+      const browser = browserSession(request);
+      if (!bearer && !browser) throw fail(401, '请通过插件入口重新打开设置页面');
+      if (request.method === 'GET' && url.pathname === '/api/settings-url') { reply(200, { url: createBrowserUrl() }); return; }
       if (request.method === 'GET' && url.pathname === '/api/status') { reply(200, await status()); return; }
       if (request.method !== 'POST') throw fail(404, '接口不存在');
       if (!request.headers['content-type']?.startsWith('application/json')) throw fail(415, '需要 JSON 请求');
@@ -140,7 +182,7 @@ export async function createManager({ root, assets, binDir, port = 29647, runtim
   });
   server.maxConnections = 20; server.requestTimeout = 30000; server.headersTimeout = 10000;
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
-  const url = `http://127.0.0.1:${server.address().port}/#${token}`;
-  return { server, token, url, status, start, restore, async close() { closed = true; cancelRestore(); await mutation.catch(() => {}); await runtime.stop(); await easytier.stop(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
+  const url = createBrowserUrl();
+  return { server, token, url, createBrowserUrl, status, start, restore, async close() { closed = true; cancelRestore(); browserTickets.clear(); browserSessions.clear(); await mutation.catch(() => {}); await runtime.stop(); await easytier.stop(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
 }
 

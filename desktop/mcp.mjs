@@ -31,7 +31,10 @@ for await (const line of lines) {
       try {
         const endpoint = await ensureManager();
         let value;
-        if (name === 'open_phone_settings') value = { settingsUrl: endpoint.origin + '/#' + endpoint.token, instruction: '在 Codex 浏览器面板打开此链接；此链接仅供本机使用，请勿发送给手机或其他人。' };
+        if (name === 'open_phone_settings') {
+          const { url } = await adminCall(endpoint, '/api/settings-url');
+          value = { settingsUrl: url, instruction: '在 Codex 浏览器面板打开此链接；此链接仅供本机使用，请勿发送给手机或其他人。' };
+        }
         else if (name === 'start_phone_connection') value = await adminCall(endpoint, '/api/start', {});
         else if (name === 'stop_phone_connection') value = await adminCall(endpoint, '/api/stop', {});
         else value = await adminCall(endpoint, '/api/status');

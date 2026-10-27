@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { adminCall } from '../desktop/client.mjs';
 const plugin = process.argv[2]; if (!plugin) throw Error('Pass the installed plugin directory');
 const dataDirectory = await mkdtemp(join(tmpdir(), 'relaydeck-verify-'));
 const manifest = JSON.parse(await readFile(join(plugin, '.codex-plugin', 'plugin.json'), 'utf8'));
@@ -35,13 +34,17 @@ try {
   if (opened.isError) throw Error(opened.content[0].text);
   const openedValue = JSON.parse(opened.content[0].text); const url = new URL(openedValue.settingsUrl);
   report.checks.loopbackSettings = url.hostname === '127.0.0.1' && url.protocol === 'http:';
-  const endpoint = { origin: url.origin, token: url.hash.slice(1) };
-  const status = await adminCall(endpoint, '/api/status'); report.checks.managerIdentity = status.kind === 'relaydeck-manager';
+  report.checks.oneTimeSettingsTicket = /^[a-f0-9]{64}$/.test(url.hash.slice(1));
+  const session = await fetch(url.origin + '/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ticket: url.hash.slice(1) }) });
+  report.checks.browserSession = session.status === 200 && /relaydeck_session=[a-f0-9]{64}/.test(session.headers.get('set-cookie') || '');
+  const cookie = (session.headers.get('set-cookie') || '').split(';', 1)[0];
+  const status = await (await fetch(url.origin + '/api/status', { headers: { cookie } })).json();
+  report.checks.managerIdentity = status.kind === 'relaydeck-manager';
   report.checks.noSecretInPublicConfig = !Object.hasOwn(status.config || {}, 'secretCipher') && !Object.hasOwn(status.config || {}, 'networkSecret');
   report.checks.noExternalEasyTierOwnership = status.easytier.owned === false;
   const html = await fetch(url.origin); report.checks.settingsPage = html.status === 200 && (await html.text()).includes('RelayDeck');
   const qr = await fetch(url.origin + '/qrcode.js'); report.checks.qrAsset = qr.status === 200;
-  await adminCall(endpoint, '/api/shutdown', {});
+  await fetch(url.origin + '/api/shutdown', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{}' });
 } catch (error) { report.error = error.message; }
 finally {
   child.stdin.end(); lines.close(); child.kill();

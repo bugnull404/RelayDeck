@@ -130,6 +130,28 @@ test('local admin rejects missing token, hostile origin, rebinding and oversized
   const html = await fetch(origin + '/'); assert.equal(html.status, 200); assert.ok(html.headers.get('content-security-policy').includes("script-src 'self'"));
   assert.ok(!(await html.text()).includes(manager.token));
 });
+test('settings entry exchanges a one-time ticket for a scoped HttpOnly browser session', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'relaydeck-session-'));
+  const runtime = { status: () => ({ running: false }), stop: async () => {} };
+  const easytier = { status: () => ({ state: 'stopped' }), stop: async () => {} };
+  const manager = await createManager({ root, assets: decodeURIComponent(assets), port: 0, runtime, easytier }); t.after(() => manager.close());
+  const origin = new URL(manager.url).origin, ticket = new URL(manager.url).hash.slice(1);
+  const bearer = { authorization: 'Bearer ' + manager.token };
+  const issued = await (await fetch(origin + '/api/settings-url', { headers: bearer })).json();
+  const issuedTicket = new URL(issued.url).hash.slice(1);
+  assert.equal(issuedTicket.length, 64);
+  assert.equal((await fetch(origin + '/api/settings-url')).status, 401);
+  const exchange = () => fetch(origin + '/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ticket: issuedTicket }) });
+  const first = await exchange(); assert.equal(first.status, 200);
+  const setCookie = first.headers.get('set-cookie'); assert.match(setCookie, /HttpOnly/); assert.match(setCookie, /SameSite=Strict/); assert.match(setCookie, /Max-Age=43200/);
+  const cookie = setCookie.split(';', 1)[0];
+  assert.equal((await fetch(origin + '/api/status', { headers: { cookie } })).status, 200);
+  assert.equal((await exchange()).status, 401);
+  assert.equal((await fetch(origin + '/api/status', { headers: { cookie: 'relaydeck_session=' + '0'.repeat(64) } })).status, 401);
+  const bareTicket = new URL(manager.url).hash.slice(1);
+  assert.equal((await fetch(origin + '/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ticket: bareTicket }) })).status, 200);
+  assert.ok(ticket.length === 64);
+});
 test('existing network config never needs EasyTier binaries or credentials and does not persist unknown fields', async () => {
   const host = addresses()[0]?.address; if (!host) return;
   const root = await mkdtemp(join(tmpdir(), 'relaydeck-config-')); const store = new ConfigStore(root);

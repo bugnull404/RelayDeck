@@ -1,15 +1,23 @@
 const $ = id => document.getElementById(id);
-const token = location.hash.slice(1) || sessionStorage.getItem('relaydeck-admin');
-if (token) sessionStorage.setItem('relaydeck-admin', token);
+const ticket = location.hash.slice(1);
 history.replaceState(null, '', location.pathname);
+let sessionReady = false;
 const footer = document.querySelector('footer');
 const footerText = version => `RelayDeck${version ? ' · ' + version : ''} · 设置页仅在本机开放。已有网络名称来自本机保存配置；全新安装不预填个人网络名称。`;
 let initialized = false, latest, busy = false, settingsDirty = false;
+async function establishSession() {
+  if (!ticket) return;
+  if (!/^[a-f0-9]{64}$/.test(ticket)) throw Error('设置入口格式无效');
+  const response = await fetch('/api/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ticket }) });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw Error(result.error || '设置入口已失效');
+  sessionReady = true;
+}
 async function call(path, body) {
   const response = await fetch('/api/' + path, { method: body === undefined ? 'GET' : 'POST',
-    headers: { authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+    headers: body === undefined ? {} : { 'content-type': 'application/json' }, credentials: 'same-origin',
     body: body === undefined ? undefined : JSON.stringify(body) });
-  const result = await response.json(); if (!response.ok) throw Error(result.error); return result;
+  const result = await response.json(); if (!response.ok) throw Object.assign(Error(result.error), { status: response.status }); return result;
 }
 function feedback(text, error = false) { $('feedback').textContent = text; $('feedback').className = error ? 'error' : ''; }
 function mode() { const value = document.querySelector('input[name=network]:checked').value; return value === 'lan' ? 'existing' : value === 'easytier' ? 'bundled' : 'relay'; }
@@ -141,11 +149,18 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) clear
 document.querySelectorAll('[data-section]').forEach(button => button.onclick = () => $(button.dataset.section).scrollIntoView({ behavior: 'smooth', block: 'center' }));
 $('settingsHelp').onclick = () => feedback('在 Windows 开始菜单搜索“RelayDeck 设置”，或使用桌面同名快捷方式。设置地址的访问凭据会自动获取，不需要保存网址或向聊天发送指令。重新运行当前发布包的安装器可修复设置入口。');
 function backendUnavailable(error) {
+  if (error.status === 401 && !ticket && !sessionReady) {
+    $('badge').textContent = '需要从插件入口打开';
+    $('activeMode').textContent = '设置页未授权';
+    $('desktopStatus').textContent = '当前只是直接打开了本机端口，没有可用的临时入口票据。';
+    feedback('请通过 Codex 的 RelayDeck 插件入口，或 Windows 开始菜单的“RelayDeck 设置”重新打开。不要直接打开 127.0.0.1:29647；为了阻止其他本机程序读取授权，裸地址不会自动获得设置权限。', true);
+    return;
+  }
   $('badge').textContent = '后台连接已中断'; $('activeMode').textContent = '连接状态待确认';
   $('desktopStatus').textContent = '页面上的地址是上次记录，当前运行状态未确认。';
   feedback('无法连接本机设置后台。若刚请求管理员启动，请完成系统授权，并从插件入口重新打开设置。\n' + error.message, true);
 }
-refresh().catch(backendUnavailable);
-setInterval(() => { if (!busy) refresh().catch(backendUnavailable); }, 5000);
+establishSession().then(refresh).catch(backendUnavailable);
+setInterval(() => { if (!busy && (sessionReady || !ticket)) refresh().catch(backendUnavailable); }, 5000);
 
 
