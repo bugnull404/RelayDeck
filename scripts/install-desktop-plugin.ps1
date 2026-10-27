@@ -15,7 +15,7 @@ $taskSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if ($LASTEXITCODE -ne 0) { throw '无法保护插件数据目录' }
 $taskConfiguration = Join-Path $DataDirectory 'config.local.json'
 if (-not (Test-Path -LiteralPath $taskConfiguration)) {
-    $taskConfig = [ordered]@{ mode='existing'; host=''; port=9443; name='Codex 电脑'; codexBinary=$CodexPath; threads=@(); allowSelectedChats=$false; autoStart=$false; easytier=@{name='';cidr='';peers=@();listenPort=11011;rpcPort=15899;devName='relaydeck-et'} }
+    $taskConfig = [ordered]@{ mode='existing'; host=''; port=29443; name='Codex 电脑'; codexBinary=$CodexPath; threads=@(); allowSelectedChats=$false; autoStart=$false; easytier=@{name='';cidr='';peers=@();listenPort=11011;rpcPort=15899;devName='relaydeck-et'} }
     $taskConfig | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $taskConfiguration -Encoding utf8
 }$taskCurrentConfig = Get-Content -LiteralPath $taskConfiguration -Raw | ConvertFrom-Json
 if (-not $taskCurrentConfig.codexBinary -or -not (Test-Path -LiteralPath $taskCurrentConfig.codexBinary)) {

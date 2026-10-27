@@ -267,7 +267,7 @@ public final class MainActivity extends Activity {
         guide.addView(text("让工作接着进行",21,foreground));guide.addView(text("在电脑 Codex 中打开「RelayDeck」设置，启动连接服务并生成配对二维码。",14,muted));LinearLayout.LayoutParams guideSpace=new LinearLayout.LayoutParams(-1,-2);guideSpace.topMargin=dp(16);guideSpace.bottomMargin=dp(14);form.addView(guide,guideSpace);
         LinearLayout network=vertical();network.setPadding(dp(16),dp(8),dp(16),dp(12));network.setBackground(rounded(surface(28,28,28),20));network.addView(text("连接方式",12,muted));
         RadioGroup modes=new RadioGroup(this);modes.setOrientation(LinearLayout.HORIZONTAL);RadioButton lan=new RadioButton(this),et=new RadioButton(this),relay=new RadioButton(this);lan.setText("直连");et.setText("EasyTier");relay.setText("Relay");for(RadioButton modeButton:new RadioButton[]{lan,et,relay}){modeButton.setTextSize(13);modeButton.setTextColor(foreground);modeButton.setId(View.generateViewId());modes.addView(modeButton,new LinearLayout.LayoutParams(0,dp(46),1));}network.addView(modes);
-        TextView networkHint=text("",12,muted);network.addView(networkHint);Button easytier=button("设置 EasyTier 组网");easytier.setBackground(rounded(surface(46,46,46),14));easytier.setTextColor(foreground);network.addView(easytier);easytier.setOnClickListener(v->easyTierDialog());form.addView(network);
+        TextView networkHint=text("",12,muted);network.addView(networkHint);Button easytier=button("设置 EasyTier 组网");easytier.setBackground(rounded(surface(46,46,46),14));easytier.setTextColor(foreground);network.addView(easytier);easytier.setOnClickListener(v->easyTierDialog());Button relaySetup=button("打开 Relay 连接设置");relaySetup.setBackground(rounded(surface(46,46,46),14));relaySetup.setTextColor(foreground);network.addView(relaySetup);relaySetup.setOnClickListener(v->relaySetupDialog());form.addView(network);
         LinearLayout card=vertical();card.setPadding(dp(16),dp(12),dp(16),dp(16));card.setBackground(rounded(surface(28,28,28),22));LinearLayout.LayoutParams cardSpace=new LinearLayout.LayoutParams(-1,-2);cardSpace.topMargin=dp(14);form.addView(card,cardSpace);card.addView(text("添加电脑",16,foreground));
         Button scan=button("扫码添加电脑");UiIcon scanIcon=new UiIcon("scan",background);scanIcon.setBounds(0,0,dp(20),dp(20));android.text.SpannableString scanLabel=new android.text.SpannableString("\uFFFC  扫码添加电脑");scanLabel.setSpan(new android.text.style.ImageSpan(scanIcon,android.text.style.DynamicDrawableSpan.ALIGN_BOTTOM),0,1,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);scan.setText(scanLabel);scan.setGravity(android.view.Gravity.CENTER);scan.setContentDescription("扫码添加电脑");card.addView(scan);scan.setOnClickListener(v->startActivityForResult(new android.content.Intent(this,PairingScanActivity.class),204));
         Button paste=button("粘贴配对信息");paste.setBackground(rounded(surface(46,46,46),16));paste.setTextColor(foreground);card.addView(paste);
@@ -279,12 +279,45 @@ public final class MainActivity extends Activity {
         TextView feedback=text("配对二维码只在手机本地识别。",12,muted);card.addView(feedback);
         Button pair=button("配对并连接");pair.setVisibility(View.GONE);card.addView(pair);
         manual.setOnClickListener(v->{boolean show=fields.getVisibility()!=View.VISIBLE;fields.setVisibility(show?View.VISIBLE:View.GONE);pair.setVisibility(show?View.VISIBLE:View.GONE);manual.setText(show?"收起手动填写  ⌃":"手动输入配对信息  ›");});
-        modes.setOnCheckedChangeListener((group,id)->{boolean direct=id==lan.getId(),relayMode=id==relay.getId();String mode=direct?"lan":relayMode?"relay":"easytier";if(api==null)getPreferences(MODE_PRIVATE).edit().putString("networkMode",mode).apply();easytier.setVisibility(ConnectionMode.shouldShowEasyTierSetup(mode,api!=null)?View.VISIBLE:View.GONE);networkHint.setText(direct?"手机和电脑连接同一 Wi-Fi，即可直接配对。":relayMode?"电脑和手机都连接 Relay，无需同一局域网或 VPN，也不会启动 EasyTier。":"适合异地连接，先完成组网，再扫描电脑配对码。");});
-        String initialMode=ConnectionMode.normalize(getPreferences(MODE_PRIVATE).getString("networkMode","lan"));modes.check("relay".equals(initialMode)?relay.getId():"easytier".equals(initialMode)?et.getId():lan.getId());easytier.setVisibility(ConnectionMode.shouldShowEasyTierSetup(initialMode,api!=null)?View.VISIBLE:View.GONE);
-        pairingRefreshControls=()->{boolean idle=!PairingCoordinator.busy();scan.setEnabled(idle);paste.setEnabled(idle);pair.setEnabled(idle&&api==null);};
+        LinearLayout relayCard=vertical();relayCard.setPadding(dp(16),dp(12),dp(16),dp(16));relayCard.setBackground(rounded(surface(28,28,28),22));LinearLayout.LayoutParams relayCardSpace=new LinearLayout.LayoutParams(-1,-2);relayCardSpace.topMargin=dp(14);form.addView(relayCard,relayCardSpace);relayCard.addView(text("Relay 配对",16,foreground));
+        TextView relayDetail=text("扫码或粘贴电脑生成的 Relay 配对信息。无需同一 Wi-Fi，无需 VPN，也无需填写 Relay 注册密钥。",12,muted);relayCard.addView(relayDetail);
+        Button relayScan=button("扫码导入 Relay 配对信息");relayScan.setBackground(rounded(surface(46,46,46),16));relayScan.setTextColor(foreground);relayCard.addView(relayScan);relayScan.setOnClickListener(v->startActivityForResult(new android.content.Intent(this,PairingScanActivity.class),204));
+        Button relayPaste=button("粘贴 Relay 配对信息");relayPaste.setBackground(rounded(surface(46,46,46),16));relayPaste.setTextColor(foreground);relayCard.addView(relayPaste);
+        TextView relayFeedback=text("配对信息只在本机解析，注册密钥不会下发到手机。",12,muted);relayCard.addView(relayFeedback);
+        Button relayPair=button("通过 Relay 配对");relayPair.setVisibility(View.GONE);relayCard.addView(relayPair);
+        modes.setOnCheckedChangeListener((group,id)->{
+            boolean direct=id==lan.getId(),relayMode=id==relay.getId();
+            String mode=direct?"lan":relayMode?"relay":"easytier";
+            if(api==null)getPreferences(MODE_PRIVATE).edit().putString("networkMode",mode).apply();
+            easytier.setVisibility(ConnectionMode.shouldShowEasyTierSetup(mode,api!=null)?View.VISIBLE:View.GONE);
+            relaySetup.setVisibility(relayMode?View.VISIBLE:View.GONE);
+            card.setVisibility(ConnectionMode.shouldShowPairingScanner(mode)?View.VISIBLE:View.GONE);
+            relayCard.setVisibility(relayMode?View.VISIBLE:View.GONE);
+            if(relayMode){fields.setVisibility(View.GONE);pair.setVisibility(View.GONE);manual.setText("手动输入配对信息  ›");}
+            networkHint.setText(direct?"手机和电脑连接同一 Wi-Fi，即可直接配对。":relayMode?"手机和电脑都连接同一个 Relay。请导入电脑生成的 Relay 配对信息，不需要 VPN。":"适合异地连接，先完成 EasyTier 组网，再扫描电脑配对码。");
+        });
+        String initialMode=ConnectionMode.normalize(getPreferences(MODE_PRIVATE).getString("networkMode","lan"));modes.check("relay".equals(initialMode)?relay.getId():"easytier".equals(initialMode)?et.getId():lan.getId());easytier.setVisibility(ConnectionMode.shouldShowEasyTierSetup(initialMode,api!=null)?View.VISIBLE:View.GONE);relaySetup.setVisibility("relay".equals(initialMode)?View.VISIBLE:View.GONE);
+        card.setVisibility(ConnectionMode.shouldShowPairingScanner(initialMode)?View.VISIBLE:View.GONE);relayCard.setVisibility("relay".equals(initialMode)?View.VISIBLE:View.GONE);
+        pairingRefreshControls=()->{boolean idle=!PairingCoordinator.busy();scan.setEnabled(idle);paste.setEnabled(idle);pair.setEnabled(idle&&api==null);relayScan.setEnabled(idle);relayPaste.setEnabled(idle);relayPair.setEnabled(idle&&api==null);};
         final PairingInfo[] scanned={null};
-        pairingInput=value->{try{PairingCoordinator.discard(this);PairingInfo info=PairingInfo.parse(value,System.currentTimeMillis());scanned[0]=info;address.setText(info.address);fingerprint.setText(info.fingerprint);code.setText(info.code);fields.setVisibility(View.VISIBLE);pair.setVisibility(View.VISIBLE);manual.setText("收起配对信息  ⌃");feedback.setText(info.relay!=null?"已读取 Relay 配对信息，将使用一次性入网票据连接。":info.easytier==null?"已读取配对信息，确认电脑地址后即可连接。":"已读取 EasyTier 入网与配对信息。点击下方确认导入，网络密钥不显示。");pair.setText(info.relay!=null?"通过 Relay 配对":info.easytier==null?"配对并连接":"加入 EasyTier 并配对");if(api==null&&info.relay!=null)modes.check(relay.getId());else if(api==null&&!"existing".equals(info.networkMode))modes.check(info.easytier==null?lan.getId():et.getId());}catch(Exception e){scanned[0]=null;code.setText("");pair.setVisibility(View.GONE);feedback.setText(e.getMessage());}};
+        pairingInput=value->{try{
+            PairingCoordinator.discard(this);PairingInfo info=PairingInfo.parse(value,System.currentTimeMillis());scanned[0]=info;address.setText(info.address);fingerprint.setText(info.fingerprint);code.setText(info.code);
+            if(info.relay!=null){
+                if(api==null)modes.check(relay.getId());else{card.setVisibility(View.GONE);relayCard.setVisibility(View.VISIBLE);}
+                fields.setVisibility(View.GONE);pair.setVisibility(View.GONE);
+                String host=relayUrlLabel(info.relay.optString("url"));
+                relayDetail.setText("已读取 Relay 配对信息\nRelay：" + host + "\n电脑身份：" + RelaySettings.shortMachineId(info.relay.optString("machineId")) + "\n证书指纹：" + RelaySettings.fingerprintLabel(info.fingerprint));
+                relayFeedback.setText("确认后将通过一次性票据验证电脑，并换取长期设备凭据。");
+                relayPair.setVisibility(View.VISIBLE);relayPair.setEnabled(api==null);
+            }else{
+                if(api==null&&!"existing".equals(info.networkMode))modes.check(info.easytier==null?lan.getId():et.getId());
+                card.setVisibility(View.VISIBLE);relayCard.setVisibility(View.GONE);fields.setVisibility(View.VISIBLE);pair.setVisibility(View.VISIBLE);manual.setText("收起配对信息  ⌃");
+                feedback.setText(info.easytier==null?"已读取配对信息，确认电脑地址后即可连接。":"已读取 EasyTier 入网与配对信息。点击下方确认导入，网络密钥不显示。");
+                pair.setText(info.easytier==null?"配对并连接":"加入 EasyTier 并配对");
+            }
+        }catch(Exception e){scanned[0]=null;code.setText("");pair.setVisibility(View.GONE);relayPair.setVisibility(View.GONE);feedback.setText(e.getMessage());relayFeedback.setText(e.getMessage());}};
         paste.setOnClickListener(v->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);if(clipboard.getPrimaryClip()==null){feedback.setText("请先复制电脑端的完整配对信息");return;}pairingInput.accept(clipboard.getPrimaryClip().getItemAt(0).coerceToText(this).toString());});
+        relayPaste.setOnClickListener(v->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);if(clipboard.getPrimaryClip()==null){relayFeedback.setText("请先复制电脑端的完整 Relay 配对信息");return;}pairingInput.accept(clipboard.getPrimaryClip().getItemAt(0).coerceToText(this).toString());});
         View.OnClickListener pairAction=v->{try{
             PairingInfo info=scanned[0];RemoteApi candidate;
             if(info!=null&&info.relay!=null){
@@ -307,11 +340,184 @@ public final class MainActivity extends Activity {
             }
         }catch(Exception e){pair.setEnabled(api==null);scan.setEnabled(true);paste.setEnabled(true);feedback.setText(error(e));}};
         pair.setOnClickListener(v->{if(api==null)pairAction.onClick(v);});
+        relayPair.setOnClickListener(v->{if(api==null)pairAction.onClick(v);});
         TextView footer=text("连接后可继续对话、查看进度和处理审批。",12,muted);footer.setGravity(android.view.Gravity.CENTER);footer.setPadding(0,dp(18),0,dp(10));form.addView(footer);
         refreshPairingUi();
         if(api!=null){pair.setEnabled(false);footer.setText("正在预览连接引导，当前配对保持不变。");Button back=button("返回当前对话");back.setBackground(rounded(surface(42,42,42),16));back.setTextColor(foreground);form.addView(back);back.setOnClickListener(v->leaveConnectionGuide());}
     }
     private void leaveConnectionGuide(){connectionGuideVisible=false;pairingInput=null;chatPage();try{if(SessionService.latest!=null)render(SessionService.latest);}catch(Exception ignored){}beginPolling();}
+    private void relaySetupDialog() {
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        LinearLayout page = panel(dialog, "Relay 连接");
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = vertical();
+        scroll.addView(content);
+        page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        LinearLayout guideCard = easyTierCard(content, "无需局域网或 VPN");
+        guideCard.addView(text("Relay 不启动 EasyTier，也不要求手机授予 VPN 权限。手机和电脑都主动连接同一个 Relay，数据在两端端到端加密。", 13, muted));
+        guideCard.addView(text("Relay 注册密钥只属于电脑和 Relay 服务端，不需要、也不应该填写在手机上。", 12, muted));
+
+        LinearLayout currentCard = easyTierCard(content, "当前 Relay");
+        TextView current = text("", 13, muted);
+        currentCard.addView(current);
+        Button useSaved = button("使用此 Relay 连接");
+        useSaved.setVisibility(View.GONE);
+        currentCard.addView(useSaved);
+        TextView switchFeedback = text("", 12, muted);
+        currentCard.addView(switchFeedback);
+        final JSONObject[] savedRelay = {null};
+        try {
+            JSONObject connection = storage.load();
+            if (RelaySettings.isRelay(connection)) {
+                savedRelay[0] = connection;
+                current.setText("已配对 · " + relayUrlLabel(RelaySettings.relayUrl(connection)) +
+                    "\n电脑身份 " + RelaySettings.shortMachineId(RelaySettings.machineId(connection)) +
+                    (RelaySettings.hasCredential(connection) ? " · 已保存长期设备凭据" : " · 当前为一次性票据"));
+                useSaved.setVisibility(View.VISIBLE);
+                useSaved.setText("relay".equals(getPreferences(MODE_PRIVATE).getString("networkMode", "")) ? "测试并重新连接 Relay" : "使用此 Relay 连接");
+            } else {
+                current.setText("尚未使用 Relay。请先在电脑的 RelayDeck 设置中选择 Relay、保存并启用，再生成配对二维码。");
+            }
+        } catch (Exception error) {
+            current.setText("无法读取本机 Relay 配置：" + error(error));
+        }
+        useSaved.setOnClickListener(v -> {
+            JSONObject connection = savedRelay[0];
+            if (connection == null) return;
+            if (api == null) {
+                switchFeedback.setText("请先打开 App 完成已有连接初始化，或重新导入 Relay 配对信息");
+                return;
+            }
+            final RemoteApi original = api;
+            final int epoch = generation;
+            final RemoteApi candidate;
+            try {
+                candidate = RemoteApi.fromConnection(new JSONObject(connection.toString())
+                    .put("address", connection.getJSONObject("relay").getString("url"))
+                    .put("networkMode", "relay"));
+            } catch (Exception failure) {
+                switchFeedback.setText("Relay 配对信息无效：" + error(failure));
+                return;
+            }
+            useSaved.setEnabled(false);
+            switchFeedback.setText("正在通过 Relay 验证电脑…");
+            worker.execute(() -> {
+                try {
+                    JSONObject verified = candidate.call("GET", "/v1/state", null, null);
+                    runOnUiThread(() -> {
+                        if (isDestroyed() || api != original || generation != epoch) {
+                            RemoteApi.release(candidate);
+                            return;
+                        }
+                        try {
+                            JSONObject latest = storage.load();
+                            if (latest == null) throw new Exception("配对信息已清除");
+                            latest.put("address", candidate.address).put("networkMode", "relay");
+                            JSONObject profiles = latest.optJSONObject("addresses");
+                            if (profiles == null) profiles = new JSONObject();
+                            profiles.put("relay", candidate.address);
+                            latest.put("addresses", profiles);
+                            storage.save(latest);
+                            api = candidate;
+                            RemoteApi.release(original);
+                            generation++;
+                            getPreferences(MODE_PRIVATE).edit().putString("networkMode", "relay").apply();
+                            verified.put("online", true);
+                            render(verified);
+                            android.content.Intent intent = new android.content.Intent(this, SessionService.class)
+                                .setAction("switch-address").putExtra("networkMode", "relay");
+                            if (!selectedThreadId.isEmpty()) intent.putExtra("threadId", selectedThreadId);
+                            startForegroundService(intent);
+                            dialog.dismiss();
+                            toast("已切换到 Relay 连接");
+                        } catch (Exception failure) {
+                            RemoteApi.release(candidate);
+                            useSaved.setEnabled(true);
+                            switchFeedback.setText("Relay 切换未完成：" + error(failure));
+                        }
+                    });
+                } catch (Exception failure) {
+                    RemoteApi.release(candidate);
+                    runOnUiThread(() -> {
+                        if (!isDestroyed()) {
+                            useSaved.setEnabled(true);
+                            switchFeedback.setText("Relay 连接未确认：" + error(failure));
+                        }
+                    });
+                }
+            });
+        });
+
+        LinearLayout importCard = easyTierCard(content, "导入电脑配对信息");
+        importCard.addView(text("扫描或粘贴电脑生成的完整 Relay 配对信息。配对信息包含一次性的入网票据和电脑公钥，不包含 Relay 注册密钥。", 12, muted));
+        Button scan = button("扫码导入 Relay 配对信息");
+        Button paste = button("粘贴 Relay 配对信息");
+        paste.setBackground(rounded(surface(46, 46, 46), 16));
+        paste.setTextColor(foreground);
+        importCard.addView(scan);
+        importCard.addView(paste);
+        TextView feedback = text("", 12, muted);
+        importCard.addView(feedback);
+
+        scan.setOnClickListener(v -> {
+            dialog.dismiss();
+            if (!connectionGuideVisible) {
+                connectionGuideVisible = true;
+                connectionPage();
+            }
+            startActivityForResult(new android.content.Intent(this, PairingScanActivity.class), 204);
+        });
+        paste.setOnClickListener(v -> {
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard.getPrimaryClip() == null) {
+                feedback.setText("请先复制电脑端生成的完整 Relay 配对信息");
+                return;
+            }
+            String value = clipboard.getPrimaryClip().getItemAt(0).coerceToText(this).toString();
+            try {
+                PairingInfo info = PairingInfo.parse(value, System.currentTimeMillis());
+                if (info.relay == null) throw new Exception("这不是 Relay 配对信息；请在电脑端选择 Relay 后生成二维码");
+                dialog.dismiss();
+                if (api != null) {
+                    new AlertDialog.Builder(this)
+                        .setTitle("重新导入 Relay 配对？")
+                        .setMessage("本机会先用新票据验证同一台电脑，再替换当前 Relay 连接。不会删除电脑上的聊天。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("继续导入", (ignored, which) -> {
+                            try {
+                                String pairing = info.json().toString();
+                                connectionGuideVisible = true;
+                                connectionPage();
+                                if (pairingInput != null) pairingInput.accept(pairing);
+                            } catch (Exception failure) {
+                                toast(error(failure));
+                            }
+                        })
+                        .show();
+                } else {
+                    connectionGuideVisible = true;
+                    connectionPage();
+                    if (pairingInput != null) pairingInput.accept(value);
+                }
+            } catch (Exception error) {
+                feedback.setText(error(error));
+            }
+        });
+
+        dialog.show();
+        dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        dialog.getWindow().setLayout(-1, -1);
+    }
+    private String relayUrlLabel(String value) {
+        if (value == null || value.isEmpty()) return "Relay 地址未知";
+        try {
+            java.net.URI uri = new java.net.URI(value);
+            return uri.getHost() == null ? value : uri.getHost() + (uri.getPath() == null || uri.getPath().isEmpty() ? "" : uri.getPath());
+        } catch (Exception ignored) {
+            return value;
+        }
+    }
     private void joinPairingNetwork(PairingInfo info,Runnable paired,java.util.function.Consumer<String> failed){
         try{PairingCoordinator.prepare(this,info);continuePendingPairing();}catch(Exception error){failed.accept(error(error));}
     }
@@ -338,6 +544,15 @@ public final class MainActivity extends Activity {
     }
     @Override public void onBackPressed(){if(connectionGuideVisible&&api!=null){leaveConnectionGuide();return;}super.onBackPressed();}
     private String networkModeLabel(){String mode=getPreferences(MODE_PRIVATE).getString("networkMode","");return "lan".equals(mode)?"局域网直连  ›":"relay".equals(mode)?"Relay 内网穿透  ›":"easytier".equals(mode)?"EasyTier 网络  ›":"连接方式  ›";}
+    private String relaySettingsLabel() {
+        try {
+            JSONObject connection = storage.load();
+            if (!RelaySettings.isRelay(connection)) return "未配置 · 扫码或粘贴电脑配对信息";
+            return relayUrlLabel(RelaySettings.relayUrl(connection)) + " · " + RelaySettings.shortMachineId(RelaySettings.machineId(connection));
+        } catch (Exception ignored) {
+            return "无法读取本机 Relay 配置";
+        }
+    }
     private void connectionModeDialog(){connectionModeDialog(status!=null&&status.isAttachedToWindow()?status:root);}
     private java.util.function.Consumer<Boolean> switchVpnPermission;
     private void connectionModeDialog(View anchor){
@@ -383,15 +598,27 @@ public final class MainActivity extends Activity {
         try {
             RemoteApi original=api;int epoch=generation;JSONObject saved=storage.load();JSONObject addresses=saved==null?null:saved.optJSONObject("addresses");if(addresses==null)addresses=new JSONObject();final JSONObject profiles=addresses;
             JSONObject advertised=currentState==null?null:currentState.optJSONObject("connectionAddresses");final JSONObject hints=advertised==null?new JSONObject():advertised;
-            final PopupWindow[] connectionMenu={null};final LinearLayout[] connectionCard={null};LinearLayout form=vertical();form.setPadding(dp(20),0,dp(20),dp(12));RadioGroup modes=new RadioGroup(this);RadioButton lan=new RadioButton(this),et=new RadioButton(this);lan.setId(View.generateViewId());et.setId(View.generateViewId());lan.setText("局域网直连 · 同一 Wi-Fi");et.setText("EasyTier · 异地组网");lan.setTextColor(foreground);et.setTextColor(foreground);modes.addView(lan);modes.addView(et);form.addView(modes);
+            final PopupWindow[] connectionMenu={null};final LinearLayout[] connectionCard={null};LinearLayout form=vertical();form.setPadding(dp(20),0,dp(20),dp(12));RadioGroup modes=new RadioGroup(this);RadioButton lan=new RadioButton(this),et=new RadioButton(this),relayMode=new RadioButton(this);lan.setId(View.generateViewId());et.setId(View.generateViewId());relayMode.setId(View.generateViewId());lan.setText("局域网直连 · 同一 Wi-Fi");et.setText("EasyTier · 异地组网");relayMode.setText("Relay · 无需同一网络");lan.setTextColor(foreground);et.setTextColor(foreground);relayMode.setTextColor(foreground);modes.addView(lan);modes.addView(et);if(RelaySettings.isRelay(saved))modes.addView(relayMode);form.addView(modes);
             TextView hint=text("",13,muted);form.addView(hint);EditText address=field("电脑 IP:9443");address.setBackground(rounded(surface(46,46,46),14));address.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);form.addView(address);
             java.util.List<String> remembered=ConnectionHistory.addresses(saved);if(!remembered.isEmpty()){TextView history=text("历史局域网地址  ⌄",13,accent);history.setPadding(dp(10),dp(12),0,dp(8));history.setTextIsSelectable(false);form.addView(history);history.setOnClickListener(view->{LinearLayout choices=vertical();choices.setPadding(dp(8),dp(8),dp(8),dp(8));choices.setBackground(rounded(surface(40,40,40),18));final PopupWindow[] popup={null};for(String rememberedAddress:remembered){TextView row=text(rememberedAddress.replace("https://",""),14,foreground);row.setPadding(dp(12),dp(12),dp(12),dp(12));choices.addView(row);row.setOnClickListener(v->{modes.check(lan.getId());address.setText(rememberedAddress);popup[0].dismiss();});}popup[0]=AnchoredMenu.below(this,history,choices,dp(280));});}
             Button etSettings=button("配置 / 连接 EasyTier");form.addView(etSettings);etSettings.setOnClickListener(v->easyTierDialog());
-            modes.setOnCheckedChangeListener((group,id)->{boolean direct=id==lan.getId();String key=direct?"lan":"easytier";address.setText(profiles.optString(key,hints.optString(direct?"lan":"primary",direct?"":original.address)));etSettings.setVisibility(direct?View.GONE:View.VISIBLE);hint.setText(direct?"填写电脑的局域网 IPv4。电脑插件需绑定此地址，或开启额外局域网直连。":"先连接 EasyTier，再填写电脑虚拟 IP。切换地址仍会校验同一电脑证书及授权。");if(connectionMenu[0]!=null)form.post(()->AnchoredMenu.resize(this,anchor,connectionCard[0],connectionMenu[0]));});
-            modes.check("easytier".equals(getPreferences(MODE_PRIVATE).getString("networkMode",""))?et.getId():lan.getId());
+            Button relaySetup=button("Relay 设置与配对信息");form.addView(relaySetup);
+            TextView relayDetail=text("",12,muted);form.addView(relayDetail);
+            modes.setOnCheckedChangeListener((group,id)->{boolean direct=id==lan.getId(),isRelay=id==relayMode.getId();String key=direct?"lan":isRelay?"relay":"easytier";address.setVisibility(isRelay?View.GONE:View.VISIBLE);address.setText(isRelay?"":profiles.optString(key,hints.optString(direct?"lan":"primary",direct?"":original.address)));etSettings.setVisibility(isRelay?View.GONE:direct?View.GONE:View.VISIBLE);relaySetup.setVisibility(isRelay?View.VISIBLE:View.GONE);relayDetail.setVisibility(isRelay?View.VISIBLE:View.GONE);relayDetail.setText(isRelay?"Relay 地址、电脑公钥和长期凭据均来自配对信息。若要更换 Relay，请在电脑端重新生成配对二维码。":"");hint.setText(isRelay?"通过 Relay 连接当前电脑，不需要 VPN。":direct?"填写电脑的局域网 IPv4。电脑插件需绑定此地址，或开启额外局域网直连。":"先连接 EasyTier，再填写电脑虚拟 IP。切换地址仍会校验同一电脑证书及授权。");if(connectionMenu[0]!=null)form.post(()->AnchoredMenu.resize(this,anchor,connectionCard[0],connectionMenu[0]));});
+            if(RelaySettings.isRelay(saved))modes.check(relayMode.getId());else modes.check("easytier".equals(getPreferences(MODE_PRIVATE).getString("networkMode",""))?et.getId():lan.getId());
+            modes.post(()->{
+                int selected=modes.getCheckedRadioButtonId();
+                address.setVisibility(selected==relayMode.getId()?View.GONE:View.VISIBLE);
+                etSettings.setVisibility(selected==relayMode.getId()||selected==lan.getId()?View.GONE:View.VISIBLE);
+                relaySetup.setVisibility(selected==relayMode.getId()?View.VISIBLE:View.GONE);
+                relayDetail.setVisibility(selected==relayMode.getId()?View.VISIBLE:View.GONE);
+                hint.setText(selected==relayMode.getId()?"通过 Relay 连接当前电脑，不需要 VPN。":selected==lan.getId()?"填写电脑的局域网 IPv4。电脑插件需绑定此地址，或开启额外局域网直连。":"先连接 EasyTier，再填写电脑虚拟 IP。切换地址仍会校验同一电脑证书及授权。");
+            });
             TextView feedback=text("验证成功后才会保存，不需要重新配对同一台电脑。",12,muted);form.addView(feedback);ScrollView body=new ScrollView(this);body.addView(form);
             LinearLayout card=vertical();card.setPadding(dp(8),dp(8),dp(8),dp(12));card.setBackground(rounded(surface(35,35,35),24));card.addView(text("连接方式",16,foreground));card.addView(body,new LinearLayout.LayoutParams(-1,-2));Button verify=button("验证并切换");card.addView(verify);PopupWindow dialog=AnchoredMenu.show(this,anchor,card,dp(350),true);connectionMenu[0]=dialog;connectionCard[0]=card;
+            relaySetup.setOnClickListener(v->{dialog.dismiss();relaySetupDialog();});
             verify.setOnClickListener(v->{
+                if(modes.getCheckedRadioButtonId()==relayMode.getId()){dialog.dismiss();relaySetupDialog();return;}
                 final String mode=modes.getCheckedRadioButtonId()==lan.getId()?"lan":"easytier";
                 final RemoteApi candidate;try{candidate=new RemoteApi(MobileState.connectionAddress(address.getText().toString()),original.fingerprint,original.token);}catch(Exception e){feedback.setText(error(e));return;}
                 verify.setEnabled(false);feedback.setText("正在验证电脑身份和连接…");
@@ -1078,6 +1305,7 @@ public final class MainActivity extends Activity {
         TextView connectionHint=settingRow(items,"连接方式",networkModeLabel(),()->{});((View)connectionHint.getParent()).setOnClickListener(v->connectionSettingsDialog(v));
         settingRow(items,"当前电脑",api==null?"尚未配对":api.address,()->new AlertDialog.Builder(this).setTitle("电脑连接").setMessage(api==null?"尚未配对":api.address+"\n\n"+SessionService.message).setPositiveButton("重新同步",(d,w)->beginPolling(true)).setNegativeButton("关闭",null).show());
         TextView networkHint=settingRow(items,"EasyTier 组网",EasyTierVpnService.state,this::easyTierDialog);
+        settingRow(items,"Relay 连接",relaySettingsLabel(),this::relaySetupDialog);
         settingRow(items,"UI 显示模式",displayModeLabel(),this::displaySettings);
         settingRow(items,"离线语音模型",VoiceModels.ready(this)?"中文模型已下载 · 约 42 MB":"首次使用时下载 · 中文离线识别",()->openVoiceModels(false));
         settingRow(items,"通知与后台运行","任务完成、审批提醒与系统权限",this::notificationSettings);

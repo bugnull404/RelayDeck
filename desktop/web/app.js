@@ -28,7 +28,7 @@ function populate(config, state) {
   const current = {host:value.host,port:value.port}; if (!profiles[value.mode]) profiles[value.mode] = current;
   const lan = value.mode === 'external' ? (profiles.external || current) : (profiles.existing || {}), bundled = profiles.bundled || {};
   const suggested = state.addresses[0];
-  $('lanIp').value = lan.host || suggested?.address || ''; $('lanPort').value = lan.port || 9443;
+  $('lanIp').value = lan.host || suggested?.address || ''; $('lanPort').value = lan.port || 29443;
   $('etPort').value = bundled.port || 9443;
   for (const id of ['name','codexBinary']) $(id).value = value[id] || '';
   for (const id of ['allowSelectedChats','autoStart']) $(id).checked = !!value[id];

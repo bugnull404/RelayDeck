@@ -75,7 +75,18 @@ export class GatewayRuntime {
     try {
       await new Promise((resolve, reject) => { gateway.server.once('error', reject); gateway.server.listen(config.port, config.host, resolve); });
       if(config.lanHost && config.lanHost!==config.host){const lan=gateway.createListener();servers.push(lan);await new Promise((resolve,reject)=>{lan.once('error',reject);lan.listen(config.port,config.lanHost,resolve);});}
-    } catch { bridge.close(); for(const server of servers){server.closeAllConnections();server.close();} throw Error('无法监听远控地址，请检查端口占用和网卡状态'); }
+    } catch (error) {
+      bridge.close();
+      for (const server of servers) { server.closeAllConnections(); server.close(); }
+      const detail = error.code === 'EADDRINUSE'
+        ? `端口 ${config.host}:${config.port} 已被其他程序占用，请改用其他端口`
+        : error.code === 'EADDRNOTAVAIL'
+          ? `地址 ${config.host} 已不在本机网卡上，请重新选择网卡`
+          : error.code === 'EACCES'
+            ? `没有权限监听 ${config.host}:${config.port}，请改用 1024 以上端口或授予权限`
+            : '无法监听远控地址，请检查端口占用和网卡状态';
+      throw Error(detail);
+    }
     let relayAgent = null;
     if (relay) {
       try {

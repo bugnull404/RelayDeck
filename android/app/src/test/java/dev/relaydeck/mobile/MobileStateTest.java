@@ -14,6 +14,21 @@ public class MobileStateTest {
         assertFalse(ConnectionMode.shouldShowEasyTierSetup("relay",false));
         assertTrue(ConnectionMode.shouldShowEasyTierSetup("easytier",false));
         assertFalse(ConnectionMode.shouldShowEasyTierSetup("easytier",true));
+        assertFalse(ConnectionMode.shouldShowPairingScanner("relay"));
+        assertTrue(ConnectionMode.shouldShowPairingScanner("lan"));
+        assertTrue(ConnectionMode.shouldShowPairingScanner("easytier"));
+    }
+    @Test public void relaySettingsExposeOnlyNonSecretConnectionMetadata() throws Exception {
+        JSONObject relay=new JSONObject().put("url","wss://relay.example.com/v1/relay").put("machineId","abcdefghijklmnopqrstuvwx")
+            .put("machinePublicKey","public").put("machineFingerprint","a".repeat(64)).put("credential","long-lived-secret").put("ticket","short-lived-ticket");
+        JSONObject connection=new JSONObject().put("networkMode","relay").put("address","wss://relay.example.com/v1/relay").put("relay",relay);
+        assertTrue(RelaySettings.isRelay(connection));
+        assertEquals("wss://relay.example.com/v1/relay",RelaySettings.relayUrl(connection));
+        assertEquals("abcdefghijklmnopqrstuvwx",RelaySettings.machineId(connection));
+        assertTrue(RelaySettings.hasCredential(connection));
+        assertEquals("abcdefgh…uvwx",RelaySettings.shortMachineId(RelaySettings.machineId(connection)));
+        String shown=RelaySettings.machineId(connection)+RelaySettings.fingerprintLabel(connection.optJSONObject("relay").getString("machineFingerprint"));
+        assertFalse(shown.contains("long-lived-secret"));assertFalse(shown.contains("short-lived-ticket"));assertFalse(shown.contains(relay.getString("machinePublicKey")));
     }
     @Test public void quotaWidgetUsesBoundedValuesAndDistinguishesLiveCachedAndOffline()throws Exception{
         JSONObject full=new JSONObject()

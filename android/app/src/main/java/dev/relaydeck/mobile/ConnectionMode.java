@@ -23,4 +23,8 @@ final class ConnectionMode {
     static boolean shouldShowEasyTierSetup(String value, boolean hasPairing) {
         return !hasPairing && usesEasyTier(value);
     }
+
+    static boolean shouldShowPairingScanner(String value) {
+        return !RELAY.equals(normalize(value));
+    }
 }
