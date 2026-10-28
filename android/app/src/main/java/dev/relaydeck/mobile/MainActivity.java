@@ -161,16 +161,6 @@ public final class MainActivity extends Activity {
     private TextView sendModeChoice;
     private String sendMode(){String fallback=currentThread!=null&&"codex-chat".equals(currentThread.optString("mode"))?"steer":"queue";return getPreferences(MODE_PRIVATE).getString("sendMode:"+(api==null?"":api.fingerprint),fallback);}
     private String effectiveSendMode(){return currentThread!=null&&"codex-chat".equals(currentThread.optString("mode"))?"steer":sendMode();}
-    private boolean workspaceTab(){
-        return getPreferences(MODE_PRIVATE).getBoolean("workspaceTab",false);
-    }
-    private void selectWorkspaceTab(boolean work){
-        getPreferences(MODE_PRIVATE).edit().putBoolean("workspaceTab",work).apply();
-        if(api==null){toast(work?"请先连接电脑后再进入工作会话":"聊天模式需要连接电脑");return;}
-        if(currentState!=null)try{render(currentState);}catch(Exception ignored){}
-        if(work&&currentState!=null&&!(currentState.optBoolean("online"))){toast("电脑当前离线，正在重新同步");beginPolling(true);}
-        if(work)root.post(this::chooseChat);
-    }
     private String composerAction(){return MobileState.composerAction(currentState,currentThread,isSending(),composer.getText().toString(),effectiveSendMode());}
     private void chooseSendMode(){
         LinearLayout choices=vertical();choices.setPadding(dp(8),dp(8),dp(8),dp(8));choices.setBackground(rounded(surface(43,43,43),18));final PopupWindow[] menu={null};
@@ -216,6 +206,8 @@ public final class MainActivity extends Activity {
     }
     private void base(String title, String subtitle) {
         root = vertical(); root.setBackgroundColor(background); root.setPadding(dp(20), dp(14), dp(20), dp(10));
+        getWindow().setStatusBarColor(background);getWindow().setNavigationBarColor(background);
+        getWindow().getDecorView().setSystemUiVisibility(palette.dark?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         root.setFocusableInTouchMode(true);root.requestFocus();
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -652,21 +644,20 @@ public final class MainActivity extends Activity {
         root.setFocusableInTouchMode(true); root.requestFocus();
         root.setOnApplyWindowInsetsListener((view,insets)->{if(android.os.Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|android.view.WindowInsets.Type.ime());view.setPadding(dp(16)+bars.left,dp(8)+bars.top,dp(16)+bars.right,dp(6)+bars.bottom);}return insets;});
         setContentView(root);
-        LinearLayout top=ChatGptMobileStyle.row(this);top.setPadding(0,dp(2),0,dp(12));
+        getWindow().setStatusBarColor(Color.rgb(250,250,250));getWindow().setNavigationBarColor(Color.rgb(250,250,250));
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        LinearLayout top=ChatGptMobileStyle.row(this);top.setPadding(0,dp(2),0,dp(10));
         Button menu=ChatGptMobileStyle.circularIcon(this,"menu","打开侧边栏",ChatGptMobileStyle.WHITE,ChatGptMobileStyle.INK);
         top.addView(menu,new LinearLayout.LayoutParams(dp(48),dp(48)));menu.setOnClickListener(v->chooseChat());
-        top.addView(ChatGptMobileStyle.segmented(this,"聊天","工作",workspaceTab(),()->selectWorkspaceTab(false),()->selectWorkspaceTab(true)),new LinearLayout.LayoutParams(dp(224),dp(50)));
-        top.addView(new View(this),new LinearLayout.LayoutParams(0,1,1));
-        LinearLayout account=ChatGptMobileStyle.row(this);
-        account.setPadding(dp(2),dp(2),dp(2),dp(2));account.setBackground(ChatGptMobileStyle.capsule(this,ChatGptMobileStyle.WHITE));
-        TextView avatar=ChatGptMobileStyle.text(this,accountInitial(),13,ChatGptMobileStyle.WHITE,false);
-        avatar.setGravity(android.view.Gravity.CENTER);avatar.setBackground(ChatGptMobileStyle.capsule(this,ChatGptMobileStyle.AVATAR));
-        account.addView(avatar,new LinearLayout.LayoutParams(dp(38),dp(38)));
-        account.setContentDescription("账户与设置");
-        top.addView(account,new LinearLayout.LayoutParams(dp(48),dp(48)));account.setOnClickListener(v->settingsPage());
+        LinearLayout brand=ChatGptMobileStyle.column(this);brand.setGravity(android.view.Gravity.CENTER);
+        TextView brandTitle=ChatGptMobileStyle.text(this,"RelayDeck",17,ChatGptMobileStyle.INK,true);brandTitle.setGravity(android.view.Gravity.CENTER);brand.addView(brandTitle);
+        TextView brandDetail=ChatGptMobileStyle.text(this,"远程 Codex",10,ChatGptMobileStyle.MUTED,false);brandDetail.setGravity(android.view.Gravity.CENTER);brandDetail.setLetterSpacing(.08f);brand.addView(brandDetail);
+        top.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        Button newChat=ChatGptMobileStyle.circularIcon(this,"edit","新建 Codex 对话",ChatGptMobileStyle.SOFT,ChatGptMobileStyle.INK);
+        top.addView(newChat,new LinearLayout.LayoutParams(dp(48),dp(48)));newChat.setOnClickListener(v->newChatWithProjectChoice());
         root.addView(top);
 
-        LinearLayout context=ChatGptMobileStyle.row(this);context.setPadding(dp(2),0,0,dp(8));
+        LinearLayout context=ChatGptMobileStyle.row(this);context.setPadding(dp(2),0,dp(2),dp(8));
         LinearLayout heading=vertical();selectChat=ChatGptMobileStyle.text(this,"Codex",22,ChatGptMobileStyle.INK,true);selectChat.setSingleLine(true);selectChat.setEllipsize(android.text.TextUtils.TruncateAt.END);heading.addView(selectChat);
         LinearLayout statusLine=ChatGptMobileStyle.row(this);
         View dot=new View(this);connectionDot=new android.graphics.drawable.GradientDrawable();connectionDot.setShape(android.graphics.drawable.GradientDrawable.OVAL);connectionDot.setColor(surface(255,159,10));dot.setBackground(connectionDot);LinearLayout.LayoutParams dotSpace=new LinearLayout.LayoutParams(dp(6),dp(6));dotSpace.rightMargin=dp(7);statusLine.addView(dot,dotSpace);
@@ -674,8 +665,6 @@ public final class MainActivity extends Activity {
         selectChat.setOnClickListener(v->chooseChat());status.setContentDescription("切换连接方式");status.setOnClickListener(v->connectionModeDialog(v));statusLine.setOnClickListener(v->connectionModeDialog(status));
         context.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
         usageRings=new UsageRingsView(this);context.addView(usageRings,new LinearLayout.LayoutParams(dp(38),dp(38)));usageRings.setOnClickListener(v->usageDialog());updateUsageIndicator();
-        Button newChat=ChatGptMobileStyle.circularIcon(this,"edit","新建会话",ChatGptMobileStyle.SOFT,ChatGptMobileStyle.INK);
-        LinearLayout.LayoutParams editSpace=new LinearLayout.LayoutParams(dp(42),dp(42));editSpace.leftMargin=dp(4);context.addView(newChat,editSpace);newChat.setOnClickListener(v->createChatFromHeader());
         root.addView(context);
         renderRevision++;deferredRows=null;displayedChat="";listScrolling=false;
         scroll=new TranscriptListView(this);scroll.setItemsCanFocus(true);scroll.setDescendantFocusability(android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS);scroll.onViewportSettled=this::updateLatestJump;scroll.setDivider(null);scroll.setDividerHeight(0);scroll.setCacheColorHint(Color.TRANSPARENT);scroll.setSelector(android.R.color.transparent);scroll.setClipToPadding(false);scroll.setPadding(0,dp(14),0,dp(18));scroll.setVerticalScrollBarEnabled(false);
@@ -1273,47 +1262,42 @@ public final class MainActivity extends Activity {
         try {
             java.util.List<JSONObject> rows=ChatCatalog.rows(currentState);
             android.app.Dialog drawer=new android.app.Dialog(this);drawer.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-            LinearLayout panel=vertical();panel.setPadding(dp(22),dp(14),dp(22),dp(10));panel.setBackgroundColor(ChatGptMobileStyle.WHITE);panel.setFitsSystemWindows(true);
-            panel.setOnApplyWindowInsetsListener((v,insets)->{if(android.os.Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|android.view.WindowInsets.Type.ime());v.setPadding(dp(22)+bars.left,dp(14)+bars.top,dp(22)+bars.right,dp(10)+bars.bottom);}return insets;});
-            LinearLayout brand=ChatGptMobileStyle.row(this);brand.setPadding(0,dp(2),0,dp(10));
-            TextView brandTitle=ChatGptMobileStyle.text(this,"ChatGPT",26,ChatGptMobileStyle.INK,true);brand.addView(brandTitle,new LinearLayout.LayoutParams(0,-2,1));
+            LinearLayout panel=vertical();panel.setPadding(dp(18),dp(12),dp(18),dp(10));panel.setBackgroundColor(ChatGptMobileStyle.WHITE);panel.setFitsSystemWindows(true);
+            panel.setOnApplyWindowInsetsListener((v,insets)->{if(android.os.Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|android.view.WindowInsets.Type.ime());v.setPadding(dp(18)+bars.left,dp(12)+bars.top,dp(18)+bars.right,dp(10)+bars.bottom);}return insets;});
+            LinearLayout brand=ChatGptMobileStyle.row(this);brand.setPadding(0,dp(2),0,dp(8));
+            LinearLayout brandLabels=ChatGptMobileStyle.column(this);
+            TextView brandTitle=ChatGptMobileStyle.text(this,"RelayDeck",22,ChatGptMobileStyle.INK,true);brandLabels.addView(brandTitle);
+            TextView brandDetail=ChatGptMobileStyle.text(this,"继续电脑上的 Codex",11,ChatGptMobileStyle.MUTED,false);brandLabels.addView(brandDetail);
+            brand.addView(brandLabels,new LinearLayout.LayoutParams(0,-2,1));
             Button searchButton=ChatGptMobileStyle.circularIcon(this,"search","搜索会话",ChatGptMobileStyle.WHITE,ChatGptMobileStyle.INK);brand.addView(searchButton,new LinearLayout.LayoutParams(dp(48),dp(48)));
             Button close=ChatGptMobileStyle.circularIcon(this,"close","关闭侧边栏",ChatGptMobileStyle.WHITE,ChatGptMobileStyle.INK);brand.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));close.setOnClickListener(v->drawer.dismiss());panel.addView(brand);
             LinearLayout searchBar=ChatGptMobileStyle.row(this);searchBar.setPadding(dp(14),0,dp(12),0);searchBar.setBackground(ChatGptMobileStyle.capsule(this,ChatGptMobileStyle.SOFT));searchBar.setVisibility(View.GONE);
             ImageView searchIcon=new ImageView(this);searchIcon.setImageDrawable(new UiIcon("search",ChatGptMobileStyle.MUTED));searchBar.addView(searchIcon,new LinearLayout.LayoutParams(dp(19),dp(19)));searchIcon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             EditText search=field("搜索会话");search.setTextColor(ChatGptMobileStyle.INK);search.setHintTextColor(ChatGptMobileStyle.MUTED);search.setBackgroundColor(Color.TRANSPARENT);search.setPadding(dp(10),dp(10),0,dp(10));search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);searchBar.addView(search,new LinearLayout.LayoutParams(0,dp(46),1));
-            LinearLayout.LayoutParams searchSpacing=new LinearLayout.LayoutParams(-1,dp(46));searchSpacing.topMargin=dp(2);searchSpacing.bottomMargin=dp(10);panel.addView(searchBar,searchSpacing);
+            LinearLayout.LayoutParams searchSpacing=new LinearLayout.LayoutParams(-1,dp(46));searchSpacing.topMargin=dp(2);searchSpacing.bottomMargin=dp(8);panel.addView(searchBar,searchSpacing);
             searchButton.setOnClickListener(v->{boolean show=searchBar.getVisibility()!=View.VISIBLE;searchBar.setVisibility(show?View.VISIBLE:View.GONE);if(show)search.requestFocus();else search.setText("");});
-            LinearLayout nav=vertical();
-            nav.addView(navRow("image","图像",null));
-            nav.addView(navRow("library","资料库",null));
-            nav.addView(navRow("projects","项目",()->{drawer.dismiss();chooseChat();}));
-            nav.addView(navRow("codex","Codex",()->{drawer.dismiss();chooseChat();}));
-            nav.addView(navRow("tasks","定时任务",null));
-            nav.addView(navRow("grid","查看更多",()->{drawer.dismiss();settingsPage();}));
-            panel.addView(nav);
+            LinearLayout newRow=ChatGptMobileStyle.row(this);newRow.setPadding(dp(12),dp(11),dp(12),dp(11));newRow.setMinimumHeight(dp(54));
+            newRow.setBackground(ChatGptMobileStyle.pressable(this,ChatGptMobileStyle.outlinedCapsule(this,ChatGptMobileStyle.WHITE,ChatGptMobileStyle.HAIRLINE),ChatGptMobileStyle.SOFT,0));
+            ImageView newIcon=new ImageView(this);newIcon.setImageDrawable(new UiIcon("edit",ChatGptMobileStyle.INK));newRow.addView(newIcon,new LinearLayout.LayoutParams(dp(22),dp(22)));
+            TextView newLabel=ChatGptMobileStyle.text(this,"新对话",16,ChatGptMobileStyle.INK,true);newLabel.setPadding(dp(13),0,0,0);newRow.addView(newLabel,new LinearLayout.LayoutParams(0,-2,1));
+            newRow.setContentDescription("新建 Codex 对话");newRow.setOnClickListener(v->{drawer.dismiss();newChatWithProjectChoice();});panel.addView(newRow);
             ChatGptMobileStyle.divider(panel,this);
-            TextView recent=ChatGptMobileStyle.text(this,"最近",12,ChatGptMobileStyle.MUTED,true);recent.setPadding(dp(6),dp(8),0,dp(4));panel.addView(recent);
+            TextView recent=ChatGptMobileStyle.text(this,"对话",12,ChatGptMobileStyle.MUTED,true);recent.setPadding(dp(6),0,0,dp(4));panel.addView(recent);
             ChatFolders folders=new ChatFolders(this,rows,api==null?"":api.fingerprint,selectedThreadId,id->{
                 drafts.put(selectedThreadId,composer.getText().toString());selectedThreadId=id;composer.setText(drafts.containsKey(id)?drafts.get(id):"");
                 try{render(currentState);}catch(Exception ignored){}beginPolling();drawer.dismiss();
             },id->{drawer.dismiss();createCodexChat(id);});panel.addView(folders,new LinearLayout.LayoutParams(-1,0,1));
             search.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int start,int before,int count){folders.query(s.toString());}public void afterTextChanged(android.text.Editable e){}});
             ChatGptMobileStyle.divider(panel,this);
-            LinearLayout footer=ChatGptMobileStyle.row(this);footer.setPadding(dp(4),dp(8),dp(4),dp(8));
-            Button newButton=ChatGptMobileStyle.circularIcon(this,"edit","新建聊天",ChatGptMobileStyle.SOFT,ChatGptMobileStyle.INK);footer.addView(newButton,new LinearLayout.LayoutParams(dp(46),dp(46)));newButton.setOnClickListener(v->{drawer.dismiss();createChatFromHeader();});
-            TextView settingsLabel=ChatGptMobileStyle.text(this,"设置",15,ChatGptMobileStyle.INK,false);settingsLabel.setPadding(dp(10),0,0,0);footer.addView(settingsLabel,new LinearLayout.LayoutParams(0,-2,1));
-            Button settingsButton=ChatGptMobileStyle.circularIcon(this,"settings","设置",ChatGptMobileStyle.WHITE,ChatGptMobileStyle.INK);footer.addView(settingsButton,new LinearLayout.LayoutParams(dp(46),dp(46)));settingsButton.setOnClickListener(v->{drawer.dismiss();settingsPage();});
+            LinearLayout footer=ChatGptMobileStyle.row(this);footer.setPadding(dp(10),dp(8),dp(10),dp(8));footer.setMinimumHeight(dp(52));
+            footer.setBackground(ChatGptMobileStyle.pressable(this,ChatGptMobileStyle.capsule(this,ChatGptMobileStyle.WHITE),ChatGptMobileStyle.SOFT,0));
+            ImageView settingsIcon=new ImageView(this);settingsIcon.setImageDrawable(new UiIcon("settings",ChatGptMobileStyle.INK));footer.addView(settingsIcon,new LinearLayout.LayoutParams(dp(22),dp(22)));
+            TextView settingsLabel=ChatGptMobileStyle.text(this,"设置",15,ChatGptMobileStyle.INK,false);settingsLabel.setPadding(dp(13),0,0,0);footer.addView(settingsLabel,new LinearLayout.LayoutParams(0,-2,1));
+            ImageView settingsArrow=new ImageView(this);settingsArrow.setImageDrawable(new UiIcon("chevron-right",ChatGptMobileStyle.MUTED));footer.addView(settingsArrow,new LinearLayout.LayoutParams(dp(17),dp(17)));
+            footer.setContentDescription("设置");footer.setOnClickListener(v->{drawer.dismiss();settingsPage();});
             panel.addView(footer);
-            drawer.setContentView(panel);drawer.show();android.view.Window window=drawer.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ChatGptMobileStyle.WHITE));window.setDimAmount(.36f);window.setLayout(Math.min(getResources().getDisplayMetrics().widthPixels-dp(36),dp(390)),-1);window.setGravity(android.view.Gravity.START);
+            drawer.setContentView(panel);drawer.show();android.view.Window window=drawer.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ChatGptMobileStyle.WHITE));window.setDimAmount(.32f);window.setLayout(Math.min(getResources().getDisplayMetrics().widthPixels-dp(28),dp(390)),-1);window.setGravity(android.view.Gravity.START);window.setStatusBarColor(ChatGptMobileStyle.WHITE);window.setNavigationBarColor(ChatGptMobileStyle.WHITE);window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         } catch (Exception error) { toast("聊天列表读取失败"); }
-    }
-    private LinearLayout navRow(String iconName,String label,Runnable action){
-        LinearLayout row=ChatGptMobileStyle.row(this);row.setPadding(dp(6),0,dp(6),0);row.setMinimumHeight(dp(58));
-        ImageView image=new ImageView(this);image.setImageDrawable(new UiIcon(iconName,ChatGptMobileStyle.INK));row.addView(image,new LinearLayout.LayoutParams(dp(24),dp(24)));
-        TextView title=ChatGptMobileStyle.text(this,label,17,ChatGptMobileStyle.INK,false);title.setPadding(dp(18),0,0,0);row.addView(title,new LinearLayout.LayoutParams(0,-2,1));
-        if(action!=null)row.setOnClickListener(v->action.run());else row.setAlpha(.55f);
-        return row;
     }
     private LinearLayout panel(android.app.Dialog dialog,String title) {
         LinearLayout page=vertical();page.setPadding(dp(16),dp(16),dp(16),dp(12));page.setBackgroundColor(background); page.setFitsSystemWindows(true);
@@ -1328,21 +1312,32 @@ public final class MainActivity extends Activity {
             runOnUiThread(()->{if(api!=original||isDestroyed())return;drafts.put(selectedThreadId,composer==null?"":composer.getText().toString());selectedThreadId=response.optString("id");if(composer!=null)composer.setText("");beginPolling(true);});
         }catch(Exception e){runOnUiThread(()->{if(api==original&&!isDestroyed())toast("创建未确认，请先检查会话列表，避免重复创建："+error(e));});}finally{channel.cancel();runOnUiThread(()->creatingChat=false);}});
     }
-    private void createProjectChat(String base){
-        if(creatingChat)return;if(api==null||currentState==null||!currentState.optBoolean("online")){toast("请先连接电脑");return;}
-        creatingChat=true;RemoteApi original=api;String operation=UUID.randomUUID().toString();toast("正在创建新聊天…");
-        worker.execute(()->{RemoteApi channel=original.readChannel();try{JSONObject response=channel.call("POST","/v1/threads/new",new JSONObject().put("baseThreadId",base),operation);
-            runOnUiThread(()->{if(api!=original||isDestroyed())return;drafts.put(selectedThreadId,composer==null?"":composer.getText().toString());selectedThreadId=response.optString("id");if(composer!=null)composer.setText("");beginPolling(true);});
-        }catch(Exception e){runOnUiThread(()->{if(api==original&&!isDestroyed())toast("创建未确认，请先检查会话列表，避免重复创建："+error(e));});}finally{channel.cancel();runOnUiThread(()->creatingChat=false);}});
-    }
-    private void createChatFromHeader(){
+    private void newChatWithProjectChoice(){
         if(api==null||currentState==null||!currentState.optBoolean("online")){toast("请先连接电脑");return;}
         try{
             java.util.List<JSONObject> rows=ChatCatalog.rows(currentState);
-            JSONObject preferred=currentThread!=null&&currentThread.optString("groupId").startsWith("project:")?currentThread:null;
-            if(preferred==null)for(JSONObject row:rows)if(row.optString("groupId").startsWith("project:")){preferred=row;break;}
-            if(preferred==null){toast("没有可用于确定项目目录的会话，请从项目分组新建");return;}
-            createCodexChat(preferred.optString("id"));
+            JSONObject direct=currentThread!=null&&currentThread.optString("groupId").startsWith("project:")?currentThread:null;
+            if(direct==null){
+                java.util.LinkedHashMap<String,JSONObject> projects=new java.util.LinkedHashMap<>();
+                for(JSONObject row:rows){
+                    String group=row.optString("groupId");
+                    if(group.startsWith("project:")&&!projects.containsKey(group))projects.put(group,row);
+                }
+                if(projects.size()==1)direct=projects.values().iterator().next();
+                else if(projects.size()>1){
+                    String[] names=new String[projects.size()],bases=new String[projects.size()];int index=0;
+                    for(JSONObject row:projects.values()){
+                        names[index]=row.optString("groupName","未命名项目");
+                        bases[index]=row.optString("id");
+                        index++;
+                    }
+                    new AlertDialog.Builder(this).setTitle("在哪个项目中新建").setItems(names,(dialog,which)->createCodexChat(bases[which])).setNegativeButton("取消",null).show();
+                    return;
+                }
+            }
+            if(direct==null&&!rows.isEmpty())direct=rows.get(0);
+            if(direct==null){toast("请先在电脑 Codex 中打开一个会话，再新建对话");return;}
+            createCodexChat(direct.optString("id"));
         }catch(Exception e){toast("无法读取项目："+error(e));}
     }
     private TextView settingRow(LinearLayout parent,String title,String subtitle,Runnable action) {
@@ -1374,24 +1369,16 @@ public final class MainActivity extends Activity {
         row.setContentDescription(title+"，"+subtitle);row.setOnClickListener(v->action.run());card.addView(row);
         return detail;
     }
-    private String accountInitial(){
-        String value=api==null?"":api.address;
-        int colon=value.indexOf(':');
-        if(colon>0)value=value.substring(0,colon);
-        if(value.isEmpty())return "R";
-        String first=value.substring(0,1).toUpperCase(java.util.Locale.ROOT);
-        return first.matches("[A-Z]")?first:"R";
-    }
     private LinearLayout accountHeader(){
-        LinearLayout header=ChatGptMobileStyle.column(this);
-        header.setGravity(android.view.Gravity.CENTER_HORIZONTAL);header.setPadding(0,dp(18),0,dp(8));
-        TextView avatar=ChatGptMobileStyle.text(this,accountInitial(),30,ChatGptMobileStyle.WHITE,false);
-        avatar.setGravity(android.view.Gravity.CENTER);avatar.setBackground(ChatGptMobileStyle.capsule(this,ChatGptMobileStyle.AVATAR));
-        header.addView(avatar,new LinearLayout.LayoutParams(dp(74),dp(74)));
-        TextView name=ChatGptMobileStyle.text(this,api==null?"RelayDeck":"RelayDeck 电脑",19,ChatGptMobileStyle.INK,true);
-        name.setGravity(android.view.Gravity.CENTER);name.setPadding(0,dp(10),0,0);header.addView(name);
-        TextView detail=ChatGptMobileStyle.text(this,api==null?"尚未连接电脑":"已连接 · "+networkModeLabel().replace("  ›",""),12,ChatGptMobileStyle.MUTED,false);
-        detail.setGravity(android.view.Gravity.CENTER);detail.setSingleLine(true);detail.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);header.addView(detail);
+        LinearLayout header=ChatGptMobileStyle.row(this);
+        header.setPadding(dp(4),dp(18),dp(4),dp(12));
+        ImageView mark=new ImageView(this);mark.setImageResource(R.drawable.app_icon);
+        header.addView(mark,new LinearLayout.LayoutParams(dp(54),dp(54)));
+        LinearLayout labels=vertical();LinearLayout.LayoutParams labelSpace=new LinearLayout.LayoutParams(0,-2,1);labelSpace.leftMargin=dp(14);header.addView(labels,labelSpace);
+        TextView name=ChatGptMobileStyle.text(this,"RelayDeck",19,ChatGptMobileStyle.INK,true);labels.addView(name);
+        String detailText=api==null?"尚未连接电脑":(currentState!=null&&currentState.optBoolean("online")?"已连接 · ":"离线 · ")+networkModeLabel().replace("  ›","")+" · "+api.address;
+        TextView detail=ChatGptMobileStyle.text(this,detailText,11,ChatGptMobileStyle.MUTED,false);
+        detail.setMaxLines(2);detail.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);labels.addView(detail);
         return header;
     }
     private String usageSummary(){
@@ -1423,23 +1410,22 @@ public final class MainActivity extends Activity {
         page.addView(settingsScroll,new LinearLayout.LayoutParams(-1,0,1));
         items.addView(accountHeader());
 
-        LinearLayout personal=settingsGroup(items,"我的 RelayDeck");
-        settingsRow(personal,"account","连接方式",networkModeLabel().replace("  ›",""),()->connectionSettingsDialog(sync),false);
-        TextView networkHint=settingsRow(personal,"globe","EasyTier 组网",EasyTierVpnService.state,this::easyTierDialog,true);
-        settingsRow(personal,"globe","Relay 连接",relaySettingsLabel(),this::relaySetupDialog,true);
-        settingsRow(personal,"desktop","当前电脑",api==null?"尚未配对":api.address,()->new AlertDialog.Builder(this).setTitle("电脑连接").setMessage(api==null?"尚未配对":api.address+"\n\n"+SessionService.message).setPositiveButton("重新同步",(d,w)->beginPolling(true)).setNegativeButton("关闭",null).show(),true);
+        LinearLayout connection=settingsGroup(items,"连接");
+        String connectionDetail=networkModeLabel().replace("  ›","")+(api==null?"":" · "+api.address);
+        settingsRow(connection,"account","连接方式",connectionDetail,()->connectionSettingsDialog(sync),false);
+        TextView networkHint=settingsRow(connection,"globe","EasyTier 组网",EasyTierVpnService.state,this::easyTierDialog,true);
+        settingsRow(connection,"globe","Relay 连接",relaySettingsLabel(),this::relaySetupDialog,true);
 
-        LinearLayout account=settingsGroup(items,"账户与外观");
-        settingsRow(account,"sparkle","用量与限额",api==null?"配对后显示短周期与长周期额度":usageSummary(),this::usageDialog,false);
-        settingsRow(account,"grid","UI 显示模式",displayModeLabel(),this::displaySettings,true);
-        settingsRow(account,"voice","离线语音模型",VoiceModels.ready(this)?"中文模型已下载 · 约 42 MB":"首次使用时下载 · 中文离线识别",()->openVoiceModels(false),true);
-        settingsRow(account,"tasks","通知与后台运行","任务完成、审批提醒与系统权限",this::notificationSettings,true);
+        LinearLayout usage=settingsGroup(items,"使用与外观");
+        settingsRow(usage,"sparkle","用量与限额",api==null?"配对后显示短周期与长周期额度":usageSummary(),this::usageDialog,false);
+        settingsRow(usage,"grid","外观",displayModeLabel(),this::displaySettings,true);
+        settingsRow(usage,"voice","离线语音模型",VoiceModels.ready(this)?"中文模型已下载 · 约 42 MB":"首次使用时下载 · 中文离线识别",()->openVoiceModels(false),true);
+        settingsRow(usage,"tasks","通知与后台运行","任务完成、审批提醒与系统权限",this::notificationSettings,true);
 
-        LinearLayout tools=settingsGroup(items,"支持与设置");
+        LinearLayout tools=settingsGroup(items,"桌面组件与更新");
         settingsRow(tools,"pin","剩余额度小部件",api==null?"配对后可在桌面查看额度":"添加到桌面，查看短周期与长周期额度",this::pinQuotaWidget,false);
         settingsRow(tools,"image","角色素材",CharacterArt.exists(this)?"已导入 · 点击桌面角色弹出额度气泡":"从本机导入透明 PNG/WebP · 点击角色弹出额度气泡",this::characterArtSettings,true);
         settingsRow(tools,"download","检测更新","主／次版本提醒、GitHub 下载与电脑插件更新",appUpdates::open,true);
-        settingsRow(tools,"scan","查看连接引导","预览扫码与配对页面，保留当前连接",()->{dialog.dismiss();connectionPage();},true);
 
         LinearLayout device=settingsGroup(items,"本机");
         settingsRow(device,"close","清除本机配对","删除本机连接信息，重新配对电脑",()->new AlertDialog.Builder(this).setTitle("清除本机配对？").setMessage("手机上的连接信息将删除。电脑端的授权记录仍需在电脑撤销；EasyTier 配置保留。")
@@ -1450,7 +1436,7 @@ public final class MainActivity extends Activity {
         android.os.Handler refresh=new android.os.Handler(getMainLooper());
         Runnable networkRefresh=new Runnable(){public void run(){networkHint.setText(EasyTierVpnService.state);if(dialog.isShowing())refresh.postDelayed(this,1000);}};
         dialog.setOnDismissListener(d->refresh.removeCallbacks(networkRefresh));
-        dialog.setContentView(page);dialog.show();dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ChatGptMobileStyle.WHITE));dialog.getWindow().setLayout(-1,-1);refresh.post(networkRefresh);
+        dialog.setContentView(page);dialog.show();android.view.Window window=dialog.getWindow();window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ChatGptMobileStyle.WHITE));window.setLayout(-1,-1);window.setStatusBarColor(ChatGptMobileStyle.WHITE);window.setNavigationBarColor(ChatGptMobileStyle.WHITE);window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);refresh.post(networkRefresh);
     }
     private void characterArtSettings() {
         android.app.Dialog dialog=new android.app.Dialog(this);LinearLayout page=panel(dialog,"角色素材");
@@ -1506,13 +1492,13 @@ public final class MainActivity extends Activity {
     }
     private String appVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception ignored){return "Preview";}}
     private android.content.SharedPreferences displayPreferences(){return getSharedPreferences("display",MODE_PRIVATE);}
-    private String displayModeLabel(){android.content.SharedPreferences p=displayPreferences();return p.getBoolean("solar",false)?"日出日落自动切换 · "+p.getString("city","所选位置"):"light".equals(p.getString("mode","dark"))?"明亮模式":"黑色模式";}
+    private String displayModeLabel(){android.content.SharedPreferences p=displayPreferences();return p.getBoolean("solar",false)?"日出日落自动切换 · "+p.getString("city","所选位置"):"light".equals(p.getString("mode","light"))?"明亮模式":"黑色模式";}
     private void displaySettings(){
-        android.content.SharedPreferences p=displayPreferences();android.app.Dialog dialog=new android.app.Dialog(this);LinearLayout page=panel(dialog,"UI 显示模式");
+        android.content.SharedPreferences p=displayPreferences();android.app.Dialog dialog=new android.app.Dialog(this);LinearLayout page=panel(dialog,"外观");
         page.addView(text("选择适合当前光线的外观",14,muted));RadioGroup modes=new RadioGroup(this);
         RadioButton dark=new RadioButton(this),light=new RadioButton(this);dark.setId(View.generateViewId());light.setId(View.generateViewId());dark.setText("黑色模式");light.setText("明亮模式");
         for(RadioButton item:new RadioButton[]{dark,light}){item.setTextColor(foreground);item.setPadding(dp(12),dp(12),dp(12),dp(12));modes.addView(item);}
-        modes.check("light".equals(p.getString("mode","dark"))?light.getId():dark.getId());page.addView(modes);
+        modes.check("light".equals(p.getString("mode","light"))?light.getId():dark.getId());page.addView(modes);
         android.widget.Switch automatic=new android.widget.Switch(this);automatic.setText("自动随日出日落改变");automatic.setTextColor(foreground);automatic.setPadding(dp(12),dp(20),dp(12),dp(20));automatic.setChecked(p.getBoolean("solar",false));page.addView(automatic);
         page.addView(text("日出后使用明亮模式，日落后使用黑色模式。按所选城市在本机计算，无需后台定位或联网。关闭自动切换后，恢复上面选择的外观。",13,muted));
         settingRow(page,"日出日落所在城市",p.getString("city","尚未选择"),()->chooseThemeCity(()->{dialog.dismiss();recreate();}));

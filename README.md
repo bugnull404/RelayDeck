@@ -8,7 +8,7 @@ RelayDeck 是一个独立的 Android + Windows 远程协作工具，用手机继
 - **RelayDeck Desktop**：Windows 端 Codex 插件与后台服务。
 - **RelayDeck Relay**：可选的自托管 WSS 中转服务，适合手机与电脑不在同一网络的场景。
 
-RelayDeck 从 `0.1.0` 开始独立发布，当前版本为 `0.1.5`，拥有自己的包名、插件 ID、数据目录、升级配置和配对数据。
+RelayDeck 从 `0.1.0` 开始独立发布，当前版本为 `0.1.6`，拥有自己的包名、插件 ID、数据目录、升级配置和配对数据。
 
 ## 连接方式
 

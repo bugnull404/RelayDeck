@@ -17,6 +17,15 @@
         <item name="android:navigationBarColor">#F7F6F3</item>
         <item name="android:windowBackground">#F7F6F3</item>
     </style>
+    <style name="AppStartupTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#181818</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">#FAFAFA</item>
+        <item name="android:navigationBarColor">#FAFAFA</item>
+        <item name="android:windowBackground">#FAFAFA</item>
+    </style>
     <style name="QuotaBubbleTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:windowIsTranslucent">true</item>

@@ -13,7 +13,7 @@ final class UiPalette {
     final int success, warning, danger, codeBackground;
     UiPalette(Context context) {
         SharedPreferences p=context.getSharedPreferences("display",Context.MODE_PRIVATE);
-        dark=SolarTheme.dark(p.getString("mode","dark"),p.getBoolean("solar",false),p.contains("latitude"),
+        dark=SolarTheme.dark(p.getString("mode","light"),p.getBoolean("solar",false),p.contains("latitude"),
             Double.longBitsToDouble(p.getLong("latitude",0)),Double.longBitsToDouble(p.getLong("longitude",0)),System.currentTimeMillis());
         background=dark?Color.rgb(17,17,17):Color.rgb(247,246,243);
         foreground=dark?Color.rgb(244,244,245):Color.rgb(28,28,27);

@@ -14,10 +14,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/**
- * Native approximations of the current ChatGPT mobile visual language.
- * No OpenAI bitmap assets or remote fonts are bundled.
- */
+/** Shared light, web-like primitives. No third-party bitmap assets or remote fonts. */
 final class ChatGptMobileStyle {
     static final int WHITE = Color.rgb(255,255,255);
     static final int INK = Color.rgb(24,24,24);
@@ -26,7 +23,6 @@ final class ChatGptMobileStyle {
     static final int SOFT = Color.rgb(246,246,246);
     static final int SOFT_PRESSED = Color.rgb(236,236,236);
     static final int BLUE = Color.rgb(53,91,224);
-    static final int AVATAR = Color.rgb(47,132,119);
 
     private ChatGptMobileStyle() {}
 
@@ -135,45 +131,6 @@ final class ChatGptMobileStyle {
             params.setMargins(left, top, right, bottom);
             view.setLayoutParams(params);
         }
-    }
-
-    /** Grey segmented switch used by the Chat / Work header. */
-    static LinearLayout segmented(Context context, String left, String right, Runnable onLeft, Runnable onRight) {
-        return segmented(context, left, right, false, onLeft, onRight);
-    }
-
-    static LinearLayout segmented(Context context, String left, String right, boolean rightSelected,
-                                  Runnable onLeft, Runnable onRight) {
-        LinearLayout shell = row(context);
-        shell.setPadding(dp(context, 4), dp(context, 4), dp(context, 4), dp(context, 4));
-        shell.setBackground(capsule(context, Color.rgb(239,239,239)));
-        TextView first = text(context, left, 15, INK, true);
-        first.setGravity(Gravity.CENTER);
-        TextView second = text(context, right, 15, MUTED, false);
-        second.setGravity(Gravity.CENTER);
-        shell.addView(first, new LinearLayout.LayoutParams(0, dp(context, 42), 1));
-        shell.addView(second, new LinearLayout.LayoutParams(0, dp(context, 42), 1));
-        final boolean[] work = {rightSelected};
-        Runnable paint = () -> {
-            first.setBackground(capsule(context, work[0] ? Color.TRANSPARENT : WHITE));
-            second.setBackground(capsule(context, work[0] ? WHITE : Color.TRANSPARENT));
-            first.setTextColor(work[0] ? MUTED : INK);
-            second.setTextColor(work[0] ? INK : MUTED);
-            first.setTypeface(Typeface.create("sans-serif", work[0] ? Typeface.NORMAL : Typeface.BOLD));
-            second.setTypeface(Typeface.create("sans-serif", work[0] ? Typeface.BOLD : Typeface.NORMAL));
-        };
-        paint.run();
-        first.setOnClickListener(v -> {
-            work[0] = false;
-            paint.run();
-            if (onLeft != null) onLeft.run();
-        });
-        second.setOnClickListener(v -> {
-            work[0] = true;
-            paint.run();
-            if (onRight != null) onRight.run();
-        });
-        return shell;
     }
 
     /** Floating composer used by the home and conversation screens. */
