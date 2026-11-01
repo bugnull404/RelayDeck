@@ -11,7 +11,7 @@ foreach ($taskName in $taskLibraries.Keys) {
     $taskOutput = Join-Path $taskDestination $taskName
     if (-not (Test-Path -LiteralPath $taskOutput)) {
         $taskUrl = "https://raw.githubusercontent.com/qiin2333/moonlight-vplus/$taskCommit/app/src/main/jniLibs/arm64-v8a/$taskName"
-        & curl.exe --fail --location --retry 3 --silent --show-error $taskUrl --output $taskOutput
+        & curl.exe --fail --location --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 2 --silent --show-error $taskUrl --output $taskOutput
         if ($LASTEXITCODE -ne 0) { throw "下载失败：$taskName" }
     }
     if ((Get-FileHash -LiteralPath $taskOutput -Algorithm SHA256).Hash -ne $taskLibraries[$taskName]) { throw "原生库校验失败：$taskName" }

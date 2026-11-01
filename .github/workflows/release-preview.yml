@@ -16,12 +16,13 @@ on:
       - 'package-lock.json'
 concurrency:
   group: relaydeck-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
   release:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,6 +69,7 @@ jobs:
         run: ./scripts/build-desktop-plugin.ps1
       - name: Build and test Android from this commit
         shell: pwsh
+        timeout-minutes: 30
         run: |
           ./scripts/build-android.ps1 -SdkPath $env:ANDROID_SDK_ROOT -JavaPath $env:JAVA_HOME -GradlePath (Join-Path $PWD 'android/gradlew.bat') -UpdateRepo $env:GITHUB_REPOSITORY
       - name: Check package privacy and collect release metadata
