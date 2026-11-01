@@ -99,7 +99,11 @@ export function verifyHandshakeProof(handshake, proof) {
 
 export function exportPublicKey(privateKey) {
   try {
-    return createPublicKey(Buffer.from(String(privateKey), 'base64url'), { format:'der', type:'pkcs8' })
+    return createPublicKey(createPrivateKey({
+      key: Buffer.from(String(privateKey), 'base64url'),
+      format: 'der',
+      type: 'pkcs8',
+    }))
       .export({ format:'der', type:'spki' }).toString('base64url');
   } catch {
     return '';

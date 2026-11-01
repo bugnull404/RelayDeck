@@ -261,3 +261,70 @@ test('local Relay config is not left behind when secret encryption fails', async
   await assert.rejects(readFile(join(root,'relay','relay.local.json')),{code:'ENOENT'});
   await assert.rejects(readFile(store.path),{code:'ENOENT'});
 });
+
+test('saved external Relay config remains valid when the manager starts it again', async t => {
+  const root=await mkdtemp(join(tmpdir(),'relaydeck-external-relay-start-'));
+  const secrets=new Map();let nextCipher=0;
+  const store=new ConfigStore(root,{
+    protect:async value=>{const cipher='test-cipher-'+(++nextCipher);secrets.set(cipher,value);return cipher;},
+    unprotect:async cipher=>secrets.get(cipher)||'',
+  });
+  let started=null;
+  const runtime={
+    status:()=>({running:!!runtime.active}),
+    stop:async()=>{runtime.active=null;},
+    start:async config=>{started=config;runtime.active={config};},
+    pairing:async rotate=>({
+      address:started.relay.publicUrl,fingerprint:'a'.repeat(64),code:'pair-code-'+(rotate?'new':'current'),
+      expiresAt:new Date(Date.now()+600000).toISOString(),networkMode:'relay',
+      relay:{url:started.relay.publicUrl,machineId:'machine1234567890',machinePublicKey:'machine-public-key',
+        machineFingerprint:'b'.repeat(64),ticket:'ticket-123456789012345678901234',ticketExpiresAt:new Date(Date.now()+120000).toISOString()},
+    }),
+  };
+  const easytier={status:()=>({owned:false}),stop:async()=>{}};
+  const manager=await createManager({root,assets:decodeURIComponent(assets),port:0,runtime,easytier,store});
+  t.after(()=>manager.close());
+  const post=(path,body)=>fetch(new URL(path,manager.url),{method:'POST',headers:{authorization:'Bearer '+manager.token,'content-type':'application/json'},body:JSON.stringify(body)});
+  const input={mode:'relay',host:'127.0.0.1',port:9443,allowSelectedChats:true,autoStart:false,
+    relayUrl:'wss://relay.bugnull.fun/v1/relay',relayPublicUrl:'wss://relay.bugnull.fun/v1/relay',
+    relayLocal:false,relayRegistrationSecret:'test-registration-secret'};
+  assert.equal((await post('/api/config',input)).status,200);
+  const saved=await store.load();
+  assert.doesNotThrow(()=>validateConfig(saved));
+  assert.equal((await post('/api/start',{})).status,200);
+  assert.equal(started.relay.url,'wss://relay.bugnull.fun/v1/relay');
+  assert.equal(started.relay.publicUrl,'wss://relay.bugnull.fun/v1/relay');
+  assert.equal(started.relayRegistrationSecret,'test-registration-secret');
+  const pairingResponse=await post('/api/pairing',{rotate:true,mode:'relay'});
+  assert.equal(pairingResponse.status,200);
+  const pairing=await pairingResponse.json();
+  assert.equal(pairing.relay.machineId,'machine1234567890');
+  assert.equal(pairing.code,'pair-code-new');
+});
+
+test('Relay registration secrets are normalized and cannot be silently reused after switching servers', async () => {
+  const root=await mkdtemp(join(tmpdir(),'relaydeck-relay-secret-normalize-'));
+  const secrets=new Map();let nextCipher=0;
+  const store=new ConfigStore(root,{
+    protect:async value=>{const cipher='test-cipher-'+(++nextCipher);secrets.set(cipher,value);return cipher;},
+    unprotect:async cipher=>secrets.get(cipher)||'',
+  });
+  const external={
+    mode:'relay',host:'127.0.0.1',port:9443,allowSelectedChats:true,
+    relayUrl:'wss://relay-one.example.com/v1/relay',
+    relayPublicUrl:'wss://relay-one.example.com/v1/relay',
+    relayLocal:false,relayRegistrationSecret:'  test-registration-secret\n',
+  };
+  await store.save(external);
+  assert.equal(await store.relayRegistrationSecret(),'test-registration-secret');
+  await store.save({...external,relayRegistrationSecret:''});
+  assert.equal(await store.relayRegistrationSecret(),'test-registration-secret');
+  await assert.rejects(
+    store.save({...external,relayUrl:'wss://relay-two.example.com/v1/relay',relayPublicUrl:'wss://relay-two.example.com/v1/relay',relayRegistrationSecret:''}),
+    /地址已变更/,
+  );
+  await assert.rejects(
+    store.save({...external,relayRegistrationSecret:'',clearRelaySecret:true}),
+    /必须立即填写/,
+  );
+});

@@ -12,6 +12,7 @@ import { turnInput, turnTimeline } from './turn-timeline.mjs';
 const THREAD_ID = /^[a-zA-Z0-9_-]{1,128}$/;
 const MAX_PENDING_REQUESTS = 64;
 const REQUEST_TIMEOUT_MS = 30000;
+const CHAT_EFFORTS = Object.freeze(['low', 'medium', 'high']);
 
 function errorWithCode(message, code) {
   return Object.assign(Error(message), { code });
@@ -32,6 +33,27 @@ function publicSettings(value = {}) {
     model: typeof value.model === 'string' ? value.model : '',
     effort: typeof value.effort === 'string' ? value.effort : '',
     serviceTier: typeof value.serviceTier === 'string' ? value.serviceTier : 'default',
+  };
+}
+
+function supportedChatEfforts(value) {
+  const available = new Set(Array.isArray(value) ? value : []);
+  return CHAT_EFFORTS.filter(effort => available.has(effort));
+}
+
+function chatModelOption(model) {
+  const efforts = supportedChatEfforts(model?.efforts);
+  if (!efforts.length) return null;
+  const defaultEffort = efforts.includes(model.defaultEffort)
+    ? model.defaultEffort
+    : efforts.includes('medium')
+      ? 'medium'
+      : efforts.at(-1);
+  return {
+    model: model.model,
+    displayName: model.displayName || model.model,
+    defaultEffort,
+    efforts,
   };
 }
 
@@ -141,7 +163,7 @@ export class LocalChatRuntime extends EventEmitter {
           createdAt: Number(chat.createdAt) || this.now(),
           updatedAt: Number(chat.updatedAt) || Number(chat.createdAt) || this.now(),
           groupId: typeof chat.groupId === 'string' && chat.groupId ? chat.groupId : 'codex-chats',
-          groupName: typeof chat.groupName === 'string' && chat.groupName ? chat.groupName : 'Codex 对话',
+          groupName: typeof chat.groupName === 'string' && chat.groupName && chat.groupName !== 'Codex 对话' ? chat.groupName : 'Chat',
           groupOrder: Number.isInteger(chat.groupOrder) ? chat.groupOrder : 2,
           settings: publicSettings(chat.settings),
         };
@@ -217,7 +239,7 @@ export class LocalChatRuntime extends EventEmitter {
       createdAt: timestamp,
       updatedAt: timestamp,
       groupId: typeof groupId === 'string' && groupId ? groupId : 'codex-chats',
-      groupName: typeof groupName === 'string' && groupName ? groupName : 'Codex 对话',
+      groupName: typeof groupName === 'string' && groupName ? groupName : 'Chat',
       groupOrder: Number.isInteger(groupOrder) ? groupOrder : 2,
       settings: publicSettings({
         model: result?.model || thread.model || model || '',
@@ -690,13 +712,17 @@ export class LocalChatRuntime extends EventEmitter {
     if (!row) throw errorWithCode('聊天不在 RelayDeck 本地对话列表中', 'THREAD_NOT_FOUND');
     const models = await this.models();
     const settings = this.entries.get(threadId)?.settings || row.settings || publicSettings();
+    const currentModel = models.find(model => model.model === settings.model) || models[0];
+    const locked = currentModel ? chatModelOption(currentModel) : null;
     return {
-      models,
+      models: locked ? [locked] : [],
       current: {
         model: settings.model,
         effort: settings.effort,
-        serviceTier: settings.serviceTier || 'default',
+        serviceTier: 'default',
       },
+      modelLocked: true,
+      effortsOnly: true,
     };
   }
 
@@ -782,24 +808,28 @@ export class LocalChatRuntime extends EventEmitter {
   }
 
   async updateModel(entry, command) {
-    const models = await this.models();
-    const model = models.find(row => row.model === command.model);
-    if (!model || !Array.isArray(model.efforts) || !model.efforts.includes(command.effort)) throw Error('模型或思考强度不在电脑可用列表中，请刷新后选择');
-    if (command.serviceTier !== undefined && command.serviceTier !== 'default' &&
-      !(model.serviceTiers || []).some(tier => tier.id === command.serviceTier && tier.id === 'priority')) {
-      throw Error('此模型未提供所选速度');
+    if (!CHAT_EFFORTS.includes(command.effort)) {
+      throw Error('Chat 仅支持低、中、高思考强度');
     }
+    if (command.serviceTier !== undefined && command.serviceTier !== 'default') {
+      throw Error('Chat 仅支持调整思考强度');
+    }
+    const models = await this.models();
+    const lockedModel = entry.settings.model || entry.row.settings?.model || '';
+    if (!lockedModel || command.model !== lockedModel) throw Error('Chat 的模型由系统自动选择，只能调整思考强度');
+    const model = models.find(row => row.model === lockedModel);
+    if (!model || !supportedChatEfforts(model.efforts).includes(command.effort)) throw Error('该思考强度不在电脑可用列表中，请刷新后选择');
     const params = {
       threadId: entry.row.id,
-      model: command.model,
+      model: lockedModel,
       effort: command.effort,
-      ...(command.serviceTier !== undefined ? { serviceTier: command.serviceTier } : {}),
+      serviceTier: 'default',
     };
     await this.request('thread/settings/update', params);
     entry.settings = publicSettings({
-      model: command.model,
+      model: lockedModel,
       effort: command.effort,
-      serviceTier: command.serviceTier ?? entry.settings.serviceTier,
+      serviceTier: 'default',
     });
     entry.row.settings = entry.settings;
     this.touch(entry.row);

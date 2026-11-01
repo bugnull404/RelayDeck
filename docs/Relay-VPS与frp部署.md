@@ -238,6 +238,12 @@ node --test --test-timeout=15000 tests/relay-protocol.test.mjs tests/relay-serve
 - VPS 只开放 `443`，`19647` 和 frp 原始端口未暴露。
 - 撤销手机授权后，旧手机无法继续读取聊天。
 
+### Relay 显示鉴权失败
+
+设置页出现 `Relay 鉴权失败：注册密钥与 Relay 服务端不一致` 时，说明电脑已经连到 Relay，但 `registrationSecret` 不匹配。请在 VPS 上查看 Relay 配置文件中的 `registrationSecret`，回到 Windows 设置页重新填写后点击“保存并启用”。不要把该密钥发到聊天、截图或提交到仓库。
+
+如果配置中仍显示 `reconnecting`，先检查 Relay 的 `/health` 是否可达；只有 `/api/status` 中的 `gateway.relay.connected` 为 `true`，配对码才可能成功生成。切换 Relay 地址时必须重新填写新服务端的密钥，插件不会静默沿用旧服务器的密钥。
+
 
 
 

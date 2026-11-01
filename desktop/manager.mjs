@@ -50,13 +50,19 @@ export async function createManager({ root, assets, binDir, port = 29647, runtim
   const enqueue = operation => { const pending = mutation.catch(() => {}).then(operation); mutation = pending; return pending; };
   const record = message => { events.push({ at: new Date().toISOString(), message }); if (events.length > 50) events.shift(); };
   const status = async () => ({ kind: 'relaydeck-manager', version: desktopVersion, config: await store.public(), addresses: addresses(), gateway: runtime.status(), easytier: easytier.status(), recovery: { ...recovery }, events });
-  const startConfigured = async () => {
-    const saved = await store.load(); if (!saved) throw Error('请先保存连接配置');
+  const appliedConfig = async saved => {
     const config = { ...validateConfig(saved), secretCipher: saved.secretCipher };
     if (config.mode === 'relay') {
       const relaySecret = await store.relayRegistrationSecret();
       if (!relaySecret) throw Error(config.relay.local ? '本机 Relay 注册密钥尚未生成，请重新保存 Relay 配置' : '请填写 Relay 注册密钥');
       config.relayRegistrationSecret = relaySecret;
+    }
+    return config;
+  };
+  const startConfigured = async () => {
+    const saved = await store.load(); if (!saved) throw Error('请先保存连接配置');
+    const config = await appliedConfig(saved);
+    if (config.mode === 'relay') {
       if (config.relay.local) {
         const relayRoot = join(root, 'relay');
         const relayPath = join(relayRoot, 'relay.local.json');
@@ -159,7 +165,7 @@ export async function createManager({ root, assets, binDir, port = 29647, runtim
           const active = runtime.active.config;
           const saved = await store.load();
           if (!saved) throw Error('请先保存连接配置');
-          if (JSON.stringify(active) !== JSON.stringify({ ...validateConfig(saved), secretCipher: saved.secretCipher })) throw Error('已保存配置尚未应用，请先应用并启动');
+          if (JSON.stringify(active) !== JSON.stringify(await appliedConfig(saved))) throw Error('已保存配置尚未应用，请先应用并启动');
           // Validate credentials and mobile address before rotating a working pairing code.
           const current = await runtime.pairing(false);
           const validated = await pairingInfo(current, active, input);

@@ -201,3 +201,27 @@ test('relay agent decrypts request sequence 0, authenticates to the local gatewa
   assert.equal(gateway.requests[0].headers['x-ignored'], undefined);
   assert.equal(JSON.stringify(registration).includes(bearer), false);
 });
+
+test('relay agent stops retrying and reports an actionable error when registration is unauthorized', async t => {
+  const relay = await createRelayServer({ host:'127.0.0.1', port:0, registrationSecret });
+  t.after(() => relay.close());
+  const agent = new RelayAgent({
+    relayUrl:`ws://127.0.0.1:${relay.port}/v1/relay`,
+    registrationSecret:'wrong-registration-secret',
+    machine:{ ...createMachineIdentity(), machineId },
+    runtimeId,
+    gatewayBase:'https://127.0.0.1:9',
+    reconnectDelays:[20],
+  });
+  t.after(() => agent.close());
+  agent.connect();
+  const deadline = Date.now() + 3000;
+  while (agent.status().state !== 'error' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  const status = agent.status();
+  assert.equal(status.state, 'error');
+  assert.equal(status.error, 'unauthorized');
+  assert.match(status.message, /注册密钥与 Relay 服务端不一致/);
+  await assert.rejects(agent.requestTicket(), /注册密钥与 Relay 服务端不一致/);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(agent.status().state, 'error');
+});

@@ -340,6 +340,14 @@ public class MobileStateTest {
         assertEquals(6,ModelPresentation.sliderEfforts(efforts,"max").length());
         assertEquals(3,ModelPresentation.sliderEfforts(new JSONArray("[\"low\",\"high\",\"max\"]"),"low").length());
     }
+    @Test public void chatOnlyExposesOfficialLowMediumHighEfforts() throws Exception {
+        JSONArray visible=ModelPresentation.chatEfforts(new JSONArray("[\"ultra\",\"high\",\"xhigh\",\"low\",\"medium\"]"));
+        assertEquals(3,visible.length());
+        assertEquals("low",visible.getString(0));
+        assertEquals("medium",visible.getString(1));
+        assertEquals("high",visible.getString(2));
+        assertEquals(0,ModelPresentation.chatEfforts(new JSONArray("[\"minimal\",\"xhigh\"]")).length());
+    }
     @Test public void officialModelLabelsKeepUltraDistinctAndUseCatalogSpeed(){
         assertEquals("GPT-6.1 Sol",ModelPresentation.name("GPT-6.1-Sol"));
         assertEquals("GPT-6 Astra",ModelPresentation.name("gpt-6-astra"));
@@ -639,5 +647,19 @@ public class MobileStateTest {
         assertEquals(1, MobileState.alerts(before, after).length());
         after.getJSONArray("threads").getJSONObject(0).getJSONArray("turns").getJSONObject(0).put("startedAtMs", 500);
         assertEquals(0, MobileState.alerts(before, after).length());
+    }
+    @Test public void chatAndWorkSectionsStayIndependentlyClassified() throws Exception {
+        JSONObject chat=new JSONObject().put("id","chat-a").put("name","Chat A").put("mode","codex-chat").put("updatedAt",20);
+        JSONObject work=new JSONObject().put("id","work-a").put("name","Work A").put("mode","work").put("updatedAt",10);
+        JSONObject handoff=new JSONObject().put("id","handoff-a").put("name","Handoff").put("mode","chat-handoff").put("updatedAt",5);
+        JSONObject state=new JSONObject().put("threads",new JSONArray().put(work).put(chat).put(handoff));
+        java.util.List<JSONObject> chats=ChatCatalog.rowsForSection(state,ChatCatalog.CHAT);
+        java.util.List<JSONObject> works=ChatCatalog.rowsForSection(state,ChatCatalog.WORK);
+        assertEquals(1,chats.size());
+        assertEquals("chat-a",chats.get(0).getString("id"));
+        assertEquals(2,works.size());
+        assertTrue(ChatCatalog.inSection(work,ChatCatalog.WORK));
+        assertTrue(ChatCatalog.inSection(handoff,ChatCatalog.WORK));
+        assertFalse(ChatCatalog.inSection(chat,ChatCatalog.WORK));
     }
 }

@@ -129,7 +129,15 @@ async function runtimeFixture(t, serverOptions = {}) {
     writable: true,
     spawnProcess: server.spawn,
     resolveBinary: async () => 'fake-codex.exe',
-    models: async () => [{ model: 'gpt-test', efforts: ['high', 'low'], serviceTiers: [{ id: 'priority' }] }],
+    models: async () => [{
+      model: 'gpt-test',
+      displayName: 'GPT Test',
+      description: 'Detailed work-only model description',
+      defaultEffort: 'medium',
+      efforts: ['low', 'medium', 'high', 'xhigh', 'ultra'],
+      effortOptions: ['low', 'medium', 'high', 'xhigh', 'ultra'].map(effort => ({ effort, description: `work-only ${effort}` })),
+      serviceTiers: [{ id: 'priority', name: 'Fast', description: 'work-only speed' }],
+    }],
   });
   t.after(() => runtime.close());
   return { root, server, runtime };
@@ -275,15 +283,23 @@ test('approvals and questions are bounded and can be answered once', async t => 
   assert.deepEqual(answer.result, { answers: { choice: { answers: ['A'] } } });
 });
 
-test('model changes validate the device model catalog before writing settings', async t => {
+test('Chat exposes only system-model efforts and cannot switch model or speed', async t => {
   const { server, runtime } = await runtimeFixture(t);
   await createChat(runtime);
-  await assert.rejects(runtime.command(THREAD_ID, { op: 'model', model: 'invented', effort: 'high' }), /可用列表/);
-  await runtime.command(THREAD_ID, { op: 'model', model: 'gpt-test', effort: 'high', serviceTier: 'priority' });
+  const options = await runtime.modelOptions(THREAD_ID);
+  assert.equal(options.modelLocked, true);
+  assert.equal(options.models.length, 1);
+  assert.deepEqual(options.models[0].efforts, ['low', 'medium', 'high']);
+  assert.equal(options.models[0].description, undefined);
+  assert.equal(options.models[0].serviceTiers, undefined);
+  await assert.rejects(runtime.command(THREAD_ID, { op: 'model', model: 'invented', effort: 'high' }), /系统自动选择/);
+  await assert.rejects(runtime.command(THREAD_ID, { op: 'model', model: 'gpt-test', effort: 'xhigh' }), /低、中、高/);
+  await assert.rejects(runtime.command(THREAD_ID, { op: 'model', model: 'gpt-test', effort: 'high', serviceTier: 'priority' }), /仅支持调整思考强度/);
+  await runtime.command(THREAD_ID, { op: 'model', model: 'gpt-test', effort: 'medium' });
   const update = server.calls.find(value => value.method === 'thread/settings/update');
   assert.equal(update.params.model, 'gpt-test');
-  assert.equal(update.params.effort, 'high');
-  assert.equal(update.params.serviceTier, 'priority');
+  assert.equal(update.params.effort, 'medium');
+  assert.equal(update.params.serviceTier, 'default');
 });
 
 test('writer conflicts and app-server exits surface explicit errors', async t => {

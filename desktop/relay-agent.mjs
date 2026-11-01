@@ -10,6 +10,12 @@ const safeUrl = value => {
   if (!url.pathname || url.pathname === '/') url.pathname = RELAY_PATH;
   return url;
 };
+function relayFailureMessage(code) {
+  if (code === 'unauthorized') return 'Relay 鉴权失败：注册密钥与 Relay 服务端不一致，请重新填写 VPS Relay 配置中的 registrationSecret';
+  if (code === 'protocol-mismatch') return 'Relay 协议版本不一致，请同时升级电脑端和 VPS Relay';
+  if (code === 'invalid-handshake') return 'Relay 拒绝了电脑握手，请检查电脑端配置后重试';
+  return code ? `Relay 连接失败：${code}` : 'Relay 尚未连接';
+}
 
 export class RelayAgent {
   constructor({ relayUrl, registrationSecret, machine, runtimeId, gatewayBase, upstreamCa, deviceId = '', allowPrivateLoopback = true, reconnectDelays = [1000, 2000, 5000, 10000, 30000] }) {
@@ -25,15 +31,16 @@ export class RelayAgent {
     this.socket = null; this.keys = null; this.ticketWaiter = null; this.ticket = '';
     this.sessions = new Map(); this.activeSession = '';
     this.streams = new Map(); this.closed = false; this.reconnectIndex = 0; this.reconnectTimer = null;
-    this.state = 'idle'; this.lastError = '';
+    this.state = 'idle'; this.lastError = ''; this.lastErrorCode = '';
   }
 
   get machineId() { return this.machine.machineId; }
-  get statusText() { return this.state === 'online' ? '已连接 Relay' : this.state === 'reconnecting' ? 'Relay 重连中' : this.state === 'error' ? 'Relay 连接失败' : 'Relay 尚未连接'; }
+  get statusText() { return this.state === 'online' ? '已连接 Relay' : this.state === 'reconnecting' ? 'Relay 重连中' : this.state === 'error' ? relayFailureMessage(this.lastErrorCode || this.lastError) : 'Relay 尚未连接'; }
 
   status() {
     return { enabled: true, state: this.state, relayUrl: this.url.toString(), machineId: this.machineId, fingerprint: this.machine.fingerprint,
-      connected: this.state === 'online', streams: this.streams.size, error: this.lastError || null };
+      connected: this.state === 'online', streams: this.streams.size, error: this.lastError || null,
+      message: this.state === 'online' ? '已连接 Relay' : this.state === 'reconnecting' ? 'Relay 重连中' : relayFailureMessage(this.lastErrorCode || this.lastError) };
   }
 
   connect() {
@@ -47,6 +54,7 @@ export class RelayAgent {
     socket.on('close', () => {
       if (this.socket !== socket) return;
       this.socket = null; this.keys = null; this.state = this.closed ? 'closed' : 'reconnecting';
+      if (!this.closed && this.lastErrorCode === 'unauthorized') this.state = 'error';
       if (this.ticketWaiter) { const reject = this.ticketWaiter.reject; this.ticketWaiter = null; reject(Error('Relay 连接已断开')); }
       for (const stream of this.streams.values()) stream.abort(Error('Relay 连接已断开'));
       this.streams.clear();
@@ -67,7 +75,7 @@ export class RelayAgent {
   }
 
   scheduleReconnect() {
-    clearTimeout(this.reconnectTimer); if (this.closed) return;
+    clearTimeout(this.reconnectTimer); if (this.closed || this.state === 'error' || this.lastErrorCode === 'unauthorized') return;
     const delay = this.reconnectDelays[Math.min(this.reconnectIndex++, this.reconnectDelays.length - 1)];
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, delay);
     this.reconnectTimer.unref?.();
@@ -77,7 +85,7 @@ export class RelayAgent {
     let message; try { message = JSON.parse(raw); } catch { return; }
     if (!message || typeof message.type !== 'string') return;
     if (message.type === 'machine-ready') {
-      this.state = 'online'; this.reconnectIndex = 0; this.lastError = '';
+      this.state = 'online'; this.reconnectIndex = 0; this.lastError = ''; this.lastErrorCode = '';
       return;
     }
     if (message.type === 'device-hello') {
@@ -111,7 +119,8 @@ export class RelayAgent {
     }
     if (message.type === 'error') {
       const text = String(message.code || message.message || 'Relay 拒绝连接');
-      this.lastError = text;
+      this.lastError = text; this.lastErrorCode = text;
+      if (['unauthorized','protocol-mismatch','invalid-handshake'].includes(text)) this.state = 'error';
       if (this.ticketWaiter) { const reject = this.ticketWaiter.reject; this.ticketWaiter = null; reject(Error(text)); }
       return;
     }
@@ -148,7 +157,9 @@ export class RelayAgent {
   }
 
   requestTicket(ttlMs = 600000) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN || this.state !== 'online') return Promise.reject(Error('Relay 尚未连接'));
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN || this.state !== 'online') {
+      return Promise.reject(Error(relayFailureMessage(this.lastErrorCode || this.lastError)));
+    }
     if (this.ticketWaiter) return Promise.reject(Error('正在生成 Relay 配对票据'));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.ticketWaiter = null; reject(Error('Relay 配对票据生成超时')); }, 10000);
@@ -160,7 +171,7 @@ export class RelayAgent {
   close(reason = '关闭 Relay') {
     this.closed = true; clearTimeout(this.reconnectTimer);
     for (const stream of this.streams.values()) stream.abort(Error(reason));
-    this.streams.clear(); this.state = 'closed';
+    this.streams.clear(); this.state = 'closed'; this.lastErrorCode = '';
     try { this.socket?.close(1000, reason.slice(0, 100)); } catch {}
     this.socket = null; this.keys = null;
   }

@@ -5,6 +5,7 @@ import {
   createHandshake,
   createMachineIdentity,
   deriveSessionKeys,
+  exportPublicKey,
   handshakeProof,
   machineFingerprint,
   openJson,
@@ -44,6 +45,7 @@ test('relay handshake is bound to the machine key and exact fields', () => {
   const handshake = createHandshake(machine.publicKey, machineId, runtimeId);
   const proof = handshakeProof(handshake, machine.privateKey);
   assert.equal(machineFingerprint(machine.publicKey), machine.fingerprint);
+  assert.equal(exportPublicKey(machine.privateKey), machine.publicKey);
   assert.equal(verifyHandshakeProof(handshake, proof), true);
   assert.equal(verifyHandshakeProof({ ...handshake, runtimeId: 'c'.repeat(32) }, proof), false);
   assert.throws(() => parsePublicKey('not-a-public-key'));

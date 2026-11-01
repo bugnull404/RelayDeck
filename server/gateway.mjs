@@ -163,8 +163,8 @@ export function createGateway({ tls, bridge, desktopVersion = '', deviceName = '
         if (typeof bridge.createLocalChat !== 'function') throw fail(403, '电脑端未开启 Codex 本地对话');
         if (typeof input.baseThreadId !== 'string' || !input.baseThreadId ||
           input.name !== undefined && (typeof input.name !== 'string' || input.name.length > 80) ||
-          input.model !== undefined && (typeof input.model !== 'string' || input.model.length > 120)) {
-          throw fail(400, '请选择项目，会话名称最多 80 字符');
+          input.model !== undefined || input.serviceTier !== undefined) {
+          throw fail(400, 'Chat 的模型由系统自动选择，只能调整思考强度');
         }
         if (typeof id !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(id)) throw fail(400, '缺少有效操作编号');
         const key = `${sessionHash}:${id}`;

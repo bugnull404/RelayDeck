@@ -65,7 +65,9 @@ async function refresh() {
     $('desktopStatus').textContent = '正在自动恢复已保存的连接，第 ' + latest.recovery.attempts + ' 次尝试；网络就绪后会自动重试，也可点击停止取消。';
   }
   $('etStatus').textContent = `受管实例：${latest.easytier.state} · 版本 ${latest.easytier.version}`;
-  if ($('relayStatus')) $('relayStatus').textContent = latest.gateway.relay ? `Relay：${latest.gateway.relay.state} · 流 ${latest.gateway.relay.streams || 0} · 机器 ${latest.gateway.relay.machineId}${latest.gateway.relay.error ? ' · ' + latest.gateway.relay.error : ''}` : 'Relay 尚未连接。';
+  if ($('relayStatus')) $('relayStatus').textContent = latest.gateway.relay
+    ? `Relay：${latest.gateway.relay.message || latest.gateway.relay.state} · 流 ${latest.gateway.relay.streams || 0} · 机器 ${latest.gateway.relay.machineId}`
+    : 'Relay 尚未连接。';
   if (!initialized) { populate(latest.config, latest); initialized = true; }
   $('lanAddresses').replaceChildren(...latest.addresses.map(row => { const option = document.createElement('option'); option.value = row.address; option.label = row.name; return option; }));
   const adapterOptions = [Object.assign(document.createElement('option'), {value:'',textContent:'手动填写地址'}), ...latest.addresses.map(row => Object.assign(document.createElement('option'), {value:row.address,textContent:row.name+' · '+row.address}))];

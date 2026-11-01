@@ -156,6 +156,8 @@ public final class MainActivity extends Activity {
     }
     private JSONObject currentState;
     private String selectedThreadId = "";
+    private String conversationSection = ChatCatalog.CHAT;
+    private TextView sectionChatTab,sectionWorkTab;
     private TextView selectChat;
     private TextView queueChip;
     private TextView sendModeChoice;
@@ -168,6 +170,73 @@ public final class MainActivity extends Activity {
         String selected=effectiveSendMode();
         for(int i=0;i<modes.length;i++){String mode=modes[i];LinearLayout row=vertical();row.setPadding(dp(12),dp(10),dp(12),dp(10));row.setBackground(rounded(mode.equals(selected)?surface(58,58,58):Color.TRANSPARENT,12));TextView title=text(titles[i]+(mode.equals(selected)?"  ✓":""),15,foreground);title.setTextIsSelectable(false);row.addView(title);TextView detail=text(details[i],12,muted);detail.setTextIsSelectable(false);row.addView(detail);choices.addView(row);row.setOnClickListener(v->{getPreferences(MODE_PRIVATE).edit().putString("sendMode:"+(api==null?"":api.fingerprint),mode).apply();menu[0].dismiss();setButtons(currentThread!=null&&currentThread.optBoolean("ready"));});}
         menu[0]=AnchoredMenu.show(this,sendModeChoice,choices,dp(290),false);
+    }
+    private TextView sectionTab(String label){
+        TextView tab=ChatGptMobileStyle.text(this,label,15,ChatGptMobileStyle.MUTED,false);
+        tab.setGravity(android.view.Gravity.CENTER);
+        tab.setPadding(dp(8),0,dp(8),0);
+        tab.setContentDescription("切换到"+label);
+        return tab;
+    }
+    private void updateSectionSwitch(){
+        if(sectionChatTab==null||sectionWorkTab==null)return;
+        boolean chat=ChatCatalog.CHAT.equals(conversationSection);
+        styleSectionTab(sectionChatTab,chat);
+        styleSectionTab(sectionWorkTab,!chat);
+    }
+    private void styleSectionTab(TextView tab,boolean active){
+        tab.setTextColor(active?ChatGptMobileStyle.INK:ChatGptMobileStyle.MUTED);
+        tab.setTypeface(Typeface.create("sans-serif",active?Typeface.BOLD:Typeface.NORMAL));
+        tab.setBackground(ChatGptMobileStyle.pressable(this,ChatGptMobileStyle.capsule(this,active?ChatGptMobileStyle.WHITE:Color.TRANSPARENT),ChatGptMobileStyle.SOFT_PRESSED,0));
+        tab.setElevation(active?dp(1):0);
+    }
+    private String sectionSelectionKey(String section){
+        return "sectionSelected:"+(api==null?"":api.fingerprint)+":"+section;
+    }
+    private JSONObject threadById(JSONArray threads,String id){
+        if(threads==null||id==null||id.isEmpty())return null;
+        for(int i=0;i<threads.length();i++){
+            JSONObject row=threads.optJSONObject(i);
+            if(row!=null&&id.equals(row.optString("id")))return row;
+        }
+        return null;
+    }
+    private String preferredSectionThread(JSONArray threads,String section){
+        if(threads==null)return "";
+        String remembered=getPreferences(MODE_PRIVATE).getString(sectionSelectionKey(section),"");
+        JSONObject row=threadById(threads,remembered);
+        if(row!=null&&ChatCatalog.inSection(row,section))return remembered;
+        row=threadById(threads,selectedThreadId);
+        if(row!=null&&ChatCatalog.inSection(row,section))return selectedThreadId;
+        for(int i=0;i<threads.length();i++){
+            row=threads.optJSONObject(i);
+            if(row!=null&&ChatCatalog.inSection(row,section))return row.optString("id");
+        }
+        return "";
+    }
+    private void rememberSectionSelection(String id){
+        if(id==null||id.isEmpty())return;
+        getPreferences(MODE_PRIVATE).edit()
+            .putString(sectionSelectionKey(conversationSection),id)
+            .putString("section:"+(api==null?"":api.fingerprint),conversationSection)
+            .apply();
+    }
+    private void switchSection(String next){
+        if(!ChatCatalog.CHAT.equals(next)&&!ChatCatalog.WORK.equals(next))return;
+        if(next.equals(conversationSection)){updateSectionSwitch();return;}
+        if(composer!=null&&!selectedThreadId.isEmpty())drafts.put(selectedThreadId,composer.getText().toString());
+        rememberSectionSelection(selectedThreadId);
+        conversationSection=next;
+        getPreferences(MODE_PRIVATE).edit().putString("section:"+(api==null?"":api.fingerprint),conversationSection).apply();
+        selectedThreadId=preferredSectionThread(currentState==null?null:currentState.optJSONArray("threads"),conversationSection);
+        if(composer!=null){composer.setText(selectedThreadId.isEmpty()?"":(drafts.containsKey(selectedThreadId)?drafts.get(selectedThreadId):""));composer.setHint(ChatCatalog.CHAT.equals(conversationSection)?"询问 RelayDeck":"向 Codex 分配工作");}
+        if(sendModeChoice!=null)sendModeChoice.setVisibility(ChatCatalog.CHAT.equals(conversationSection)?View.GONE:View.VISIBLE);
+        updateSectionSwitch();
+        if(currentState!=null)try{render(currentState);}catch(Exception ignored){}
+        if(api!=null)beginPolling(!selectedThreadId.isEmpty());
+    }
+    private void newChatForCurrentSection(){
+        newChatWithProjectChoice(ChatCatalog.WORK.equals(conversationSection));
     }
     private final android.content.BroadcastReceiver updates = new android.content.BroadcastReceiver() {
         @Override public void onReceive(android.content.Context context, android.content.Intent intent) {
@@ -191,10 +260,16 @@ public final class MainActivity extends Activity {
             if (saved != null) api = RemoteApi.fromConnection(saved);
         } catch (Exception e) { storage.clear(); }
         selectedThreadId = getIntent().getStringExtra("threadId") == null ? (api == null ? "" : getPreferences(MODE_PRIVATE).getString("selected:" + api.fingerprint, "")) : getIntent().getStringExtra("threadId");
+        conversationSection = getPreferences(MODE_PRIVATE).getString("section:" + (api == null ? "" : api.fingerprint), ChatCatalog.CHAT);
         if (state != null) {
             selectedThreadId = state.getString("selectedChat", selectedThreadId);
+            conversationSection = state.getString("section", conversationSection);
             java.util.ArrayList<String> ids = state.getStringArrayList("draftIds"), values = state.getStringArrayList("draftValues");
             if(ids != null && values != null) for(int i=0;i<Math.min(ids.size(),values.size());i++)drafts.put(ids.get(i),values.get(i));
+        }
+        if(!selectedThreadId.isEmpty()&&SessionService.latest!=null){
+            JSONObject target=threadById(SessionService.latest.optJSONArray("threads"),selectedThreadId);
+            if(target!=null)conversationSection=ChatCatalog.inSection(target,ChatCatalog.CHAT)?ChatCatalog.CHAT:ChatCatalog.WORK;
         }
         if (api == null || state!=null&&state.getBoolean("connectionGuideVisible",false)&&!state.getBoolean("pairingInProgress",false)) connectionPage(); else chatPage();
         if(state==null){showLaunchAnimation();appUpdates.launch();}
@@ -649,12 +724,20 @@ public final class MainActivity extends Activity {
         LinearLayout top=ChatGptMobileStyle.row(this);top.setPadding(0,dp(2),0,dp(10));
         Button menu=ChatGptMobileStyle.circularIcon(this,"menu","打开侧边栏",ChatGptMobileStyle.WHITE,ChatGptMobileStyle.INK);
         top.addView(menu,new LinearLayout.LayoutParams(dp(48),dp(48)));menu.setOnClickListener(v->chooseChat());
-        LinearLayout brand=ChatGptMobileStyle.column(this);brand.setGravity(android.view.Gravity.CENTER);
-        TextView brandTitle=ChatGptMobileStyle.text(this,"RelayDeck",17,ChatGptMobileStyle.INK,true);brandTitle.setGravity(android.view.Gravity.CENTER);brand.addView(brandTitle);
-        TextView brandDetail=ChatGptMobileStyle.text(this,"远程 Codex",10,ChatGptMobileStyle.MUTED,false);brandDetail.setGravity(android.view.Gravity.CENTER);brandDetail.setLetterSpacing(.08f);brand.addView(brandDetail);
-        top.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        Button newChat=ChatGptMobileStyle.circularIcon(this,"edit","新建 Codex 对话",ChatGptMobileStyle.SOFT,ChatGptMobileStyle.INK);
-        top.addView(newChat,new LinearLayout.LayoutParams(dp(48),dp(48)));newChat.setOnClickListener(v->newChatWithProjectChoice());
+        LinearLayout sectionSwitch=ChatGptMobileStyle.row(this);
+        sectionSwitch.setPadding(dp(4),dp(4),dp(4),dp(4));
+        sectionSwitch.setBackground(ChatGptMobileStyle.capsule(this,ChatGptMobileStyle.SOFT));
+        sectionChatTab=sectionTab("聊天");
+        sectionWorkTab=sectionTab("工作");
+        sectionSwitch.addView(sectionChatTab,new LinearLayout.LayoutParams(0,-1,1));
+        sectionSwitch.addView(sectionWorkTab,new LinearLayout.LayoutParams(0,-1,1));
+        sectionChatTab.setOnClickListener(v->switchSection(ChatCatalog.CHAT));
+        sectionWorkTab.setOnClickListener(v->switchSection(ChatCatalog.WORK));
+        LinearLayout.LayoutParams switchSpace=new LinearLayout.LayoutParams(0,dp(48),1);
+        switchSpace.leftMargin=dp(8);switchSpace.rightMargin=dp(8);top.addView(sectionSwitch,switchSpace);
+        Button newChat=ChatGptMobileStyle.circularIcon(this,"edit","新建会话",ChatGptMobileStyle.SOFT,ChatGptMobileStyle.INK);
+        top.addView(newChat,new LinearLayout.LayoutParams(dp(48),dp(48)));newChat.setOnClickListener(v->newChatForCurrentSection());
+        updateSectionSwitch();
         root.addView(top);
 
         LinearLayout context=ChatGptMobileStyle.row(this);context.setPadding(dp(2),0,dp(2),dp(8));
@@ -677,12 +760,11 @@ public final class MainActivity extends Activity {
         questionArea=new InlineQuestionsView(this,()->root.getHeight()-root.getPaddingTop()-root.getPaddingBottom());questionContent=vertical();questionArea.addView(questionContent);questionArea.setVisibility(View.GONE);questionSignature="";questionChat="";root.addView(questionArea,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout dock = vertical();dock.setPadding(dp(12),dp(6),dp(8),dp(8));dock.setBackground(ChatGptMobileStyle.outlinedCapsule(this,ChatGptMobileStyle.WHITE,ChatGptMobileStyle.HAIRLINE));dock.setElevation(dp(6));LinearLayout.LayoutParams dockSpace=new LinearLayout.LayoutParams(-1,-2);dockSpace.topMargin=dp(6);dockSpace.leftMargin=dp(8);dockSpace.rightMargin=dp(8);root.addView(dock,dockSpace);
         queueChip=text("",12,foreground);queueChip.setPadding(dp(8),dp(7),dp(8),dp(2));queueChip.setTextIsSelectable(false);queueChip.setVisibility(View.GONE);queueChip.setOnClickListener(v->queueDialog());dock.addView(queueChip);
-        composer=field("询问 Codex");composer.setTextColor(ChatGptMobileStyle.INK);composer.setHintTextColor(ChatGptMobileStyle.MUTED);composer.setBackgroundColor(Color.TRANSPARENT);composer.setSingleLine(false);composer.setMaxLines(6);composer.setMinLines(1);composer.setTextSize(16);composer.setPadding(dp(8),dp(8),dp(4),dp(8));composer.setText(drafts.containsKey(selectedThreadId)?drafts.get(selectedThreadId):"");
+        composer=field(ChatCatalog.CHAT.equals(conversationSection)?"询问 RelayDeck":"向 Codex 分配工作");composer.setTextColor(ChatGptMobileStyle.INK);composer.setHintTextColor(ChatGptMobileStyle.MUTED);composer.setBackgroundColor(Color.TRANSPARENT);composer.setSingleLine(false);composer.setMaxLines(6);composer.setMinLines(1);composer.setTextSize(16);composer.setPadding(dp(8),dp(8),dp(4),dp(8));composer.setText(drafts.containsKey(selectedThreadId)?drafts.get(selectedThreadId):"");
         dock.addView(composer,new LinearLayout.LayoutParams(-1,-2));
-        View composerRule=new View(this);composerRule.setBackgroundColor(palette.border);dock.addView(composerRule,new LinearLayout.LayoutParams(-1,dp(1)));
         LinearLayout controls=new LinearLayout(this);controls.setGravity(android.view.Gravity.CENTER_VERTICAL);controls.setPadding(0,dp(2),0,0);
         modelChoice=powerText("选择模型  ⌄",12,muted);modelChoice.setTextIsSelectable(false);modelChoice.setSingleLine(true);modelChoice.setEllipsize(android.text.TextUtils.TruncateAt.END);modelChoice.setPadding(dp(8),dp(8),dp(4),dp(8));modelChoice.setContentDescription("选择模型与思考强度");modelChoice.setOnClickListener(v->modelDialog());controls.addView(modelChoice,new LinearLayout.LayoutParams(0,dp(44),1));
-        sendModeChoice=text("排队  ⌄",12,muted);sendModeChoice.setTextIsSelectable(false);sendModeChoice.setGravity(android.view.Gravity.CENTER);sendModeChoice.setPadding(dp(7),0,dp(7),0);sendModeChoice.setOnClickListener(v->chooseSendMode());controls.addView(sendModeChoice,new LinearLayout.LayoutParams(dp(68),dp(44)));
+        sendModeChoice=text("排队  ⌄",12,muted);sendModeChoice.setTextIsSelectable(false);sendModeChoice.setGravity(android.view.Gravity.CENTER);sendModeChoice.setPadding(dp(7),0,dp(7),0);sendModeChoice.setOnClickListener(v->chooseSendMode());controls.addView(sendModeChoice,new LinearLayout.LayoutParams(dp(68),dp(44)));sendModeChoice.setVisibility(ChatCatalog.CHAT.equals(conversationSection)?View.GONE:View.VISIBLE);
         send=icon("send","发送消息",true);controls.addView(send,new LinearLayout.LayoutParams(dp(40),dp(40)));dock.addView(controls);
         send.setOnLongClickListener(v->{if(speechInput!=null&&speechInput.running())speechInput.stop();else if(composer.getText().toString().trim().isEmpty())beginVoiceInput();else toast("点击发送消息");return true;});
         sendStatus=text("正在同步聊天状态…",11,muted);sendStatus.setGravity(android.view.Gravity.CENTER);sendStatus.setTextIsSelectable(false);sendStatus.setPadding(0,dp(5),0,0);root.addView(sendStatus);
@@ -759,13 +841,20 @@ public final class MainActivity extends Activity {
     private void render(JSONObject state) throws Exception {
         if(connectionGuideVisible){currentState=state;return;}
         currentState = state;
-        if(!selectedThreadId.isEmpty()&&selectedThreadId.equals(state.optString("recoveredSelectionFrom"))){drafts.put(selectedThreadId,composer==null?"":composer.getText().toString());selectedThreadId=state.optString("selectedThreadId");if(composer!=null)composer.setText(drafts.containsKey(selectedThreadId)?drafts.get(selectedThreadId):"");}
         if(appUpdates!=null&&api!=null&&state.optBoolean("online"))appUpdates.desktop(state.optString("desktopVersion"),api.fingerprint);
         JSONArray threads = state.optJSONArray("threads"); if (threads == null) threads = new JSONArray();
-        if (selectedThreadId.isEmpty()) selectedThreadId = state.optString("selectedThreadId");
-        if (selectedThreadId.isEmpty() && threads.length() > 0 && state.optString("recoveredSelectionFrom").isEmpty()) selectedThreadId = threads.getJSONObject(0).getString("id");
-        currentThread = null;
-        for (int i = 0; i < threads.length(); i++) if (threads.getJSONObject(i).getString("id").equals(selectedThreadId)) currentThread = threads.getJSONObject(i);
+        if(!selectedThreadId.isEmpty()&&selectedThreadId.equals(state.optString("recoveredSelectionFrom"))){
+            drafts.put(selectedThreadId,composer==null?"":composer.getText().toString());
+            JSONObject recovered=threadById(threads,state.optString("selectedThreadId"));
+            selectedThreadId=recovered!=null&&ChatCatalog.inSection(recovered,conversationSection)?recovered.optString("id"):"";
+            if(composer!=null)composer.setText(drafts.containsKey(selectedThreadId)?drafts.get(selectedThreadId):"");
+        }
+        JSONObject selectedRow=threadById(threads,selectedThreadId);
+        if(selectedRow!=null&&!ChatCatalog.inSection(selectedRow,conversationSection))selectedThreadId="";
+        if(selectedThreadId.isEmpty())selectedThreadId=preferredSectionThread(threads,conversationSection);
+        currentThread=threadById(threads,selectedThreadId);
+        rememberSectionSelection(selectedThreadId);
+        updateSectionSwitch();
         if(currentThread!=null){
             JSONObject visibleThread=new JSONObject();java.util.Iterator<String> fields=currentThread.keys();while(fields.hasNext()){String key=fields.next();visibleThread.put(key,currentThread.get(key));}currentThread=visibleThread;JSONArray questions=currentThread.optJSONArray("questions"),shown=new JSONArray();
             java.util.Set<String> hidden=getSharedPreferences("dismissedQuestions",MODE_PRIVATE).getStringSet("keys",java.util.Collections.emptySet());
@@ -775,8 +864,15 @@ public final class MainActivity extends Activity {
         updateConnectionDot();updateUsageIndicator();
         updateQuestionCards();
         if (currentThread == null) {
-            status.setText(state.optBoolean("online") ? "正在加载所选聊天历史…" : "离线 · 暂无该聊天的本地记录");
-            renderRevision++;renderHandler.removeCallbacks(prepareRows);deferredRows=null;chatAdapter.replace(java.util.Collections.emptyList());jumpRail.entries(java.util.Collections.emptyList());jumpRail.cancel();railChat="";setButtons(false);displayedChat="";return;
+            boolean chat=ChatCatalog.CHAT.equals(conversationSection);
+            selectChat.setText(chat?"聊天":"工作");
+            status.setText(state.optBoolean("online")?(chat?"还没有聊天，点右上角开始":"还没有工作会话，点右上角新建"):"离线 · 暂无本地记录");
+            ((PowerLabel)modelChoice).power(false,false);
+            modelChoice.setText(chat?"思考 · 默认  ⌄":"选择模型  ⌄");
+            sendModeChoice.setVisibility(chat?View.GONE:View.VISIBLE);
+            renderRevision++;renderHandler.removeCallbacks(prepareRows);deferredRows=null;
+            chatAdapter.replace(java.util.Collections.singletonList(new ChatRows.Row("section:empty","welcome",new JSONObject())));
+            jumpRail.entries(java.util.Collections.emptyList());jumpRail.cancel();railChat="";setButtons(false);displayedChat="";return;
         }
         selectChat.setText(currentThread.optString("name", "Codex"));
         status.setText(!state.optBoolean("online") ? "离线 · 显示本地保存记录 · " + SessionService.message
@@ -784,7 +880,7 @@ public final class MainActivity extends Activity {
             : "已连接 · 历史可读，桌面聊天尚未就绪");
         if (SessionService.message.contains("保存失败")) status.append(" · " + SessionService.message);
         status.append(" · "+networkModeLabel());
-        String selectedModel=currentThread.optString("model"),effort=currentThread.optString("reasoningEffort");((PowerLabel)modelChoice).power("ultra".equals(effort),"priority".equals(currentThread.optString("serviceTier")));modelChoice.setText(selectedModel.isEmpty()?"选择模型  ⌄":ModelPresentation.name(selectedModel)+(effort.isEmpty()?"":" · "+effortLabel(effort))+"  ⌄");
+        String selectedModel=currentThread.optString("model"),effort=currentThread.optString("reasoningEffort");boolean chatMode="codex-chat".equals(currentThread.optString("mode"));sendModeChoice.setVisibility(chatMode?View.GONE:View.VISIBLE);composer.setHint(chatMode?"询问 RelayDeck":"向 Codex 分配工作");((PowerLabel)modelChoice).power(!chatMode&&"ultra".equals(effort),!chatMode&&"priority".equals(currentThread.optString("serviceTier")));modelChoice.setText(chatMode?"思考 · "+(effort.isEmpty()?"默认":effortLabel(effort,true))+"  ⌄":selectedModel.isEmpty()?"选择模型  ⌄":ModelPresentation.name(selectedModel)+(effort.isEmpty()?"":" · "+effortLabel(effort))+"  ⌄");modelChoice.setContentDescription(chatMode?"选择思考强度":"选择模型与思考强度");
         setButtons(currentThread.optBoolean("ready"));loadModels(false);
         renderRevision++;if(!currentThread.optString("id").equals(displayedChat))deferredRows=null;if(!renderHandler.hasCallbacks(prepareRows))renderHandler.postDelayed(prepareRows,100);
     }
@@ -972,6 +1068,7 @@ public final class MainActivity extends Activity {
     }
     private void modelDialog(){if(!isSending())loadModels(true);}
     private String effortLabel(String value){return ModelPresentation.effort(value);}
+    private String effortLabel(String value,boolean chatMode){if(!chatMode)return effortLabel(value);switch(value){case "low":return "低";case "medium":return "中";case "high":return "高";default:return effortLabel(value);}}
     private PowerLabel powerText(String value,int size,int color){PowerLabel label=new PowerLabel(this);label.setText(value);label.setTextSize(size);label.setTextColor(color);label.setPadding(0,dp(7),0,dp(7));return label;}
     private boolean modelContextValid(String threadId,RemoteApi client,int epoch){return !isDestroyed()&&client==api&&epoch==generation&&threadId.equals(selectedThreadId)&&currentState.optBoolean("online")&&currentThread!=null&&currentThread.optBoolean("ready");}
     private void applyModel(JSONObject model,String effort,String threadId,RemoteApi client,int epoch){
@@ -983,50 +1080,55 @@ public final class MainActivity extends Activity {
         JSONObject selected=models.optJSONObject(0);for(int i=0;i<models.length();i++){JSONObject candidate=models.optJSONObject(i);if(supplied!=null&&candidate.optString("model").equals(supplied.optString("model")))selected=candidate;}
         final JSONObject model=selected;final JSONObject current=supplied==null?new JSONObject():supplied;
         JSONArray available=model.optJSONArray("efforts");if(available==null||available.length()==0){toast("此模型未提供思考强度");return;}
-        final JSONArray efforts=ModelPresentation.sliderEfforts(available,current.optString("effort"));
+        final boolean chatMode=currentThread!=null&&"codex-chat".equals(currentThread.optString("mode"));
+        final JSONArray efforts=chatMode?ModelPresentation.chatEfforts(available):ModelPresentation.sliderEfforts(available,current.optString("effort"));
+        if(efforts.length()==0){toast(chatMode?"当前模型不支持低、中、高思考强度":"此模型未提供思考强度");return;}
         String effort=current.optString("effort",model.optString("defaultEffort"));int initial=0;for(int i=0;i<efforts.length();i++)if(efforts.optString(i).equals(effort))initial=i;
         dismissModelPopup();LinearLayout panel=vertical();panel.setPadding(dp(12),dp(4),dp(12),dp(6));GradientDrawable background=rounded(surface(42,42,42),22);background.setStroke(dp(1),surface(65,65,65));panel.setBackground(background);
         LinearLayout heading=new LinearLayout(this);heading.setGravity(android.view.Gravity.CENTER_VERTICAL);
         JSONObject fastOption=null;JSONArray tiers=model.optJSONArray("serviceTiers");if(tiers!=null)for(int i=0;i<tiers.length();i++)if("priority".equals(tiers.optJSONObject(i).optString("id")))fastOption=tiers.optJSONObject(i);final JSONObject fastTier=fastOption;
         final boolean[] fast={"priority".equals(current.optString("serviceTier"))},pending={false};final int[] confirmed={initial};
-        ImageView lightning=new ImageView(this);lightning.setPadding(dp(8),dp(8),dp(8),dp(8));heading.addView(lightning,new LinearLayout.LayoutParams(dp(34),dp(34)));lightning.setEnabled(fastTier!=null);
-        TextView strength=text(effortLabel(efforts.optString(initial)),16,surface(65,137,251));strength.setGravity(android.view.Gravity.CENTER);strength.setTextIsSelectable(false);strength.setPadding(0,0,0,0);heading.addView(strength,new LinearLayout.LayoutParams(0,dp(34),1));
+        final ImageView lightning=chatMode?null:new ImageView(this);
+        if(lightning!=null){lightning.setPadding(dp(8),dp(8),dp(8),dp(8));heading.addView(lightning,new LinearLayout.LayoutParams(dp(34),dp(34)));lightning.setEnabled(fastTier!=null);}
+        TextView strength=text(effortLabel(efforts.optString(initial),chatMode),16,surface(65,137,251));strength.setGravity(android.view.Gravity.CENTER);strength.setTextIsSelectable(false);strength.setPadding(0,0,0,0);heading.addView(strength,new LinearLayout.LayoutParams(0,dp(34),1));
         ImageView reset=new ImageView(this);reset.setImageDrawable(new UiIcon("reset",muted));reset.setPadding(dp(8),dp(8),dp(8),dp(8));reset.setContentDescription("恢复默认推理强度");heading.addView(reset,new LinearLayout.LayoutParams(dp(34),dp(34)));panel.addView(heading);
-        TextView modelName=text(ModelPresentation.name(model.optString("displayName",model.optString("model")))+" ›",13,surface(191,191,191));modelName.setGravity(android.view.Gravity.CENTER);modelName.setPadding(0,0,0,0);modelName.setTextIsSelectable(false);modelName.setSingleLine(true);modelName.setEllipsize(android.text.TextUtils.TruncateAt.END);modelName.setContentDescription("选择模型");panel.addView(modelName,new LinearLayout.LayoutParams(-1,dp(22)));
+        final TextView modelName=chatMode?null:text(ModelPresentation.name(model.optString("displayName",model.optString("model")))+" ›",13,surface(191,191,191));
+        if(modelName!=null){modelName.setGravity(android.view.Gravity.CENTER);modelName.setPadding(0,0,0,0);modelName.setTextIsSelectable(false);modelName.setSingleLine(true);modelName.setEllipsize(android.text.TextUtils.TruncateAt.END);modelName.setContentDescription("选择模型");panel.addView(modelName,new LinearLayout.LayoutParams(-1,dp(22)));}
         final EffortSlider[] sliderView={null};
         Runnable style=()->{
             boolean ultra="ultra".equals(efforts.optString(sliderView[0]==null?confirmed[0]:sliderView[0].getProgress()));
             strength.setTextColor(ultra?surface(176,121,255):surface(65,137,251));
-            lightning.setImageDrawable(new UiIcon(fast[0]?"bolt-filled":"bolt",fast[0]?(ultra?surface(174,116,255):surface(85,155,255)):muted));lightning.setBackground(rounded(fast[0]?surface(59,59,59):Color.TRANSPARENT,10));lightning.setAlpha(fastTier==null?.35f:pending[0]?.55f:1f);lightning.setContentDescription(fastTier==null?"此模型未提供快速模式":fast[0]?"快速模式已开启，点按切换标准模式，用量更多":"标准模式，点按启用快速模式，用量更多");
+            if(lightning!=null){lightning.setImageDrawable(new UiIcon(fast[0]?"bolt-filled":"bolt",fast[0]?(ultra?surface(174,116,255):surface(85,155,255)):muted));lightning.setBackground(rounded(fast[0]?surface(59,59,59):Color.TRANSPARENT,10));lightning.setAlpha(fastTier==null?.35f:pending[0]?.55f:1f);lightning.setContentDescription(fastTier==null?"此模型未提供快速模式":fast[0]?"快速模式已开启，点按切换标准模式，用量更多":"标准模式，点按启用快速模式，用量更多");}
             if(sliderView[0]!=null){sliderView[0].ultra(ultra);sliderView[0].fast(fast[0]);}
         };
         java.util.function.BiConsumer<Integer,String> submit=(index,tier)->{
             if(pending[0]||isSending()||!modelContextValid(threadId,client,epoch))return;
             try{JSONObject payload=new JSONObject().put("op","model").put("threadId",threadId).put("model",model.getString("model")).put("effort",efforts.optString(index));if(tier!=null)payload.put("serviceTier",tier);
-                pending[0]=true;sliderView[0].setEnabled(false);lightning.setEnabled(false);reset.setEnabled(false);modelName.setEnabled(false);style.run();
-                Runnable enable=()->{pending[0]=false;sliderView[0].setEnabled(efforts.length()>1);lightning.setEnabled(fastTier!=null);reset.setEnabled(true);modelName.setEnabled(true);style.run();};
-                command(payload,false,()->{confirmed[0]=index;if(tier!=null)fast[0]="priority".equals(tier);try{current.put("model",model.getString("model")).put("effort",efforts.optString(index)).put("serviceTier",fast[0]?"priority":"default");}catch(Exception ignored){}enable.run();},()->{sliderView[0].setProgress(confirmed[0]);strength.setText(effortLabel(efforts.optString(confirmed[0])));enable.run();});
+                pending[0]=true;sliderView[0].setEnabled(false);if(lightning!=null)lightning.setEnabled(false);reset.setEnabled(false);if(modelName!=null)modelName.setEnabled(false);style.run();
+                Runnable enable=()->{pending[0]=false;sliderView[0].setEnabled(efforts.length()>1);if(lightning!=null)lightning.setEnabled(fastTier!=null);reset.setEnabled(true);if(modelName!=null)modelName.setEnabled(true);style.run();};
+                command(payload,false,()->{confirmed[0]=index;if(tier!=null)fast[0]="priority".equals(tier);try{current.put("model",model.getString("model")).put("effort",efforts.optString(index)).put("serviceTier",fast[0]?"priority":"default");}catch(Exception ignored){}enable.run();},()->{sliderView[0].setProgress(confirmed[0]);strength.setText(effortLabel(efforts.optString(confirmed[0]),chatMode));enable.run();});
             }catch(Exception e){toast(error(e));}
         };
         EffortSlider slider=new EffortSlider(this,efforts.length(),initial,new EffortSlider.Listener(){
-            public void preview(int index){strength.setText(effortLabel(efforts.optString(index)));style.run();}
+            public void preview(int index){strength.setText(effortLabel(efforts.optString(index),chatMode));style.run();}
             public void commit(int index){if(index!=confirmed[0])submit.accept(index,null);}
         });sliderView[0]=slider;panel.addView(slider,new LinearLayout.LayoutParams(-1,dp(46)));style.run();
-        lightning.setOnClickListener(v->{if(fastTier!=null)submit.accept(confirmed[0],fast[0]?"default":"priority");});
+        if(chatMode){TextView note=text("模型由系统自动管理，仅可调整思考强度",11,muted);note.setGravity(android.view.Gravity.CENTER);note.setTextIsSelectable(false);note.setPadding(0,dp(2),0,dp(4));panel.addView(note);}
+        if(lightning!=null)lightning.setOnClickListener(v->{if(fastTier!=null)submit.accept(confirmed[0],fast[0]?"default":"priority");});
         reset.setOnClickListener(v->{String defaultEffort=model.optString("defaultEffort");for(int i=0;i<efforts.length();i++)if(efforts.optString(i).equals(defaultEffort)){slider.setProgress(i);if(i!=confirmed[0])submit.accept(i,null);return;}});
-        modelName.setOnClickListener(v->{dismissModelPopup();showModelPicker(models,current,threadId,client,epoch);});
+        if(modelName!=null)modelName.setOnClickListener(v->{dismissModelPopup();showModelPicker(models,current,threadId,client,epoch);});
         modelPopup=AnchoredMenu.show(this,modelChoice,panel,dp(320),false);
     }
     private void showModelPicker(JSONArray models,JSONObject current,String threadId,RemoteApi client,int epoch){
         final PopupWindow[] menu={null};LinearLayout panel=vertical();panel.setPadding(dp(14),dp(10),dp(14),dp(12));panel.setBackground(rounded(surface(42,42,42),22));TextView title=text("选择模型",13,muted);title.setTextIsSelectable(false);panel.addView(title);
-        TextView group=text("默认",15,foreground);group.setTextIsSelectable(false);group.setPadding(0,dp(6),0,0);panel.addView(group);TextView subtitle=text("推荐模型集",13,muted);subtitle.setTextIsSelectable(false);subtitle.setPadding(0,dp(2),0,dp(8));panel.addView(subtitle);
+        TextView group=text("默认",15,foreground);group.setTextIsSelectable(false);group.setPadding(0,dp(6),0,0);panel.addView(group);TextView subtitle=text("工作模式 · 显示完整模型说明",13,muted);subtitle.setTextIsSelectable(false);subtitle.setPadding(0,dp(2),0,dp(8));panel.addView(subtitle);
         ScrollView options=new ScrollView(this);LinearLayout rows=vertical();options.addView(rows);
         for(int i=0;i<models.length();i++){
             JSONObject model=models.optJSONObject(i);boolean selected=current!=null&&model.optString("model").equals(current.optString("model"));LinearLayout row=new LinearLayout(this);row.setGravity(android.view.Gravity.CENTER_VERTICAL);row.setPadding(0,0,0,0);
-            TextView name=text(ModelPresentation.name(model.optString("displayName",model.optString("model"))),15,foreground);name.setTextIsSelectable(false);row.addView(name,new LinearLayout.LayoutParams(0,dp(36),1));TextView check=text(selected?"✓":"",17,foreground);check.setTextIsSelectable(false);check.setGravity(android.view.Gravity.CENTER);row.addView(check,new LinearLayout.LayoutParams(dp(24),dp(36)));row.setContentDescription("选择模型 "+name.getText()+(selected?"，当前模型":""));
+            LinearLayout labels=vertical();TextView name=text(ModelPresentation.name(model.optString("displayName",model.optString("model"))),15,foreground);name.setTextIsSelectable(false);labels.addView(name);String description=model.optString("description").trim();if(!description.isEmpty()){TextView detail=text(description,12,muted);detail.setTextIsSelectable(false);detail.setMaxLines(2);detail.setEllipsize(android.text.TextUtils.TruncateAt.END);detail.setPadding(0,dp(2),0,0);labels.addView(detail);}row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));int rowHeight=description.isEmpty()?dp(40):dp(64);TextView check=text(selected?"✓":"",17,foreground);check.setTextIsSelectable(false);check.setGravity(android.view.Gravity.CENTER);row.addView(check,new LinearLayout.LayoutParams(dp(24),rowHeight));row.setMinimumHeight(rowHeight);row.setContentDescription("选择模型 "+name.getText()+(selected?"，当前模型":""));
             row.setOnClickListener(v->{menu[0].dismiss();if(selected)showModelMenu(models,current,threadId,client,epoch);else applyModel(model,model.optString("defaultEffort"),threadId,client,epoch);});rows.addView(row);
         }
-        panel.addView(options,new LinearLayout.LayoutParams(-1,Math.min(dp(models.length()*36),(int)(getResources().getDisplayMetrics().heightPixels*.55))));menu[0]=AnchoredMenu.show(this,modelChoice,panel,dp(320),false);modelPopup=menu[0];
+        panel.addView(options,new LinearLayout.LayoutParams(-1,Math.min(dp(models.length()*64),(int)(getResources().getDisplayMetrics().heightPixels*.55))));menu[0]=AnchoredMenu.show(this,modelChoice,panel,dp(320),false);modelPopup=menu[0];
     }
     private View questionCard(ChatRows.Row row){
         JSONObject request=row.data;String threadId=currentThread.optString("id");RemoteApi client=api;int epoch=generation;
@@ -1086,9 +1188,10 @@ public final class MainActivity extends Activity {
                 TextView reviewButton=text(approval.optBoolean("submitting")?"审批已提交 · 等待确认":"查看并处理  ›",13,foreground);reviewButton.setTextIsSelectable(false);reviewButton.setGravity(android.view.Gravity.CENTER);reviewButton.setMinHeight(dp(40));reviewButton.setBackground(outlined(palette.dark?Color.rgb(48,40,28):Color.rgb(245,236,219),palette.dark?Color.rgb(108,84,47):Color.rgb(216,188,139),10));reviewButton.setEnabled(!approval.optBoolean("submitting"));approvalCard.addView(reviewButton,new LinearLayout.LayoutParams(-1,dp(40)));tap(reviewButton,()->review(approval,threadId));wrapper.addView(approvalCard);
             }else {
                 LinearLayout welcome=vertical();welcome.setPadding(dp(4),dp(72),dp(4),dp(28));
-                TextView mark=text("C",22,foreground);mark.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));mark.setGravity(android.view.Gravity.CENTER);mark.setTextIsSelectable(false);mark.setBackground(outlined(palette.raised,palette.border,13));welcome.addView(mark,new LinearLayout.LayoutParams(dp(48),dp(48)));
-                TextView title=text("从电脑继续",25,foreground);title.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));title.setTextIsSelectable(false);title.setPadding(0,dp(18),0,0);welcome.addView(title);
-                TextView detail=text("查看进度、发送新指令，或处理等待中的审批。",15,muted);detail.setLineSpacing(dp(2),1.12f);detail.setTextIsSelectable(false);welcome.addView(detail);
+                boolean chat=ChatCatalog.CHAT.equals(conversationSection);
+                TextView mark=text(chat?"C":"W",22,foreground);mark.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));mark.setGravity(android.view.Gravity.CENTER);mark.setTextIsSelectable(false);mark.setBackground(outlined(palette.raised,palette.border,15));welcome.addView(mark,new LinearLayout.LayoutParams(dp(48),dp(48)));
+                TextView title=text(currentThread==null?(chat?"还没有聊天":"还没有工作会话"):(chat?"开始新的聊天":"从电脑继续工作"),25,foreground);title.setTypeface(Typeface.create("sans-serif",Typeface.BOLD));title.setTextIsSelectable(false);title.setPadding(0,dp(18),0,0);welcome.addView(title);
+                TextView detail=text(currentThread==null?(chat?"点击右上角新建聊天。消息会保存为本机 Codex 对话。":"点击右上角新建工作会话，或先从电脑打开一个 Codex 项目。"):(chat?"调整思考强度，继续当前对话。":"查看进度、发送新指令，或处理等待中的审批。"),15,muted);detail.setLineSpacing(dp(2),1.12f);detail.setTextIsSelectable(false);welcome.addView(detail);
                 wrapper.addView(welcome);
             }
             return wrapper;
@@ -1097,7 +1200,7 @@ public final class MainActivity extends Activity {
     private void toolText(LinearLayout parent,String label,String value){parent.addView(text(label,11,muted));TextView body=text(value,12,foreground);body.setTypeface(Typeface.MONOSPACE);body.setHorizontallyScrolling(true);HorizontalScrollView horizontal=new HorizontalScrollView(this);horizontal.addView(body);parent.addView(horizontal);}
     private View bubble(String content, boolean user,JSONArray files,String delivery) {
         LinearLayout card=vertical();
-        if(user){card.setPadding(dp(13),dp(8),dp(13),dp(10));card.setBackground(rounded(palette.userBubble,14));}
+        if(user){card.setPadding(dp(15),dp(10),dp(15),dp(11));card.setBackground(rounded(palette.userBubble,18));}
         else{card.setPadding(0,dp(2),0,dp(4));card.setBackgroundColor(Color.TRANSPARENT);}
         if(!content.isEmpty()){if(user){TextView message=text(content,16,foreground);message.setTextIsSelectable(true);card.addView(message);}else MessageBody.add(this,card,content,foreground,muted);}
         chatFiles.add(card,files,currentThread.optString("id"),api);
@@ -1260,14 +1363,15 @@ public final class MainActivity extends Activity {
     private void chooseChat() {
         if (currentState == null) { toast("尚无聊天列表，请先连接电脑"); return; }
         try {
-            java.util.List<JSONObject> rows=ChatCatalog.rows(currentState);
+            java.util.List<JSONObject> rows=ChatCatalog.rowsForSection(currentState,conversationSection);
+            boolean chatSection=ChatCatalog.CHAT.equals(conversationSection);
             android.app.Dialog drawer=new android.app.Dialog(this);drawer.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
             LinearLayout panel=vertical();panel.setPadding(dp(18),dp(12),dp(18),dp(10));panel.setBackgroundColor(ChatGptMobileStyle.WHITE);panel.setFitsSystemWindows(true);
             panel.setOnApplyWindowInsetsListener((v,insets)->{if(android.os.Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars()|android.view.WindowInsets.Type.ime());v.setPadding(dp(18)+bars.left,dp(12)+bars.top,dp(18)+bars.right,dp(10)+bars.bottom);}return insets;});
             LinearLayout brand=ChatGptMobileStyle.row(this);brand.setPadding(0,dp(2),0,dp(8));
             LinearLayout brandLabels=ChatGptMobileStyle.column(this);
             TextView brandTitle=ChatGptMobileStyle.text(this,"RelayDeck",22,ChatGptMobileStyle.INK,true);brandLabels.addView(brandTitle);
-            TextView brandDetail=ChatGptMobileStyle.text(this,"继续电脑上的 Codex",11,ChatGptMobileStyle.MUTED,false);brandLabels.addView(brandDetail);
+            TextView brandDetail=ChatGptMobileStyle.text(this,chatSection?"聊天 · 本机 Codex 对话":"工作 · 桌面 Codex 会话",11,ChatGptMobileStyle.MUTED,false);brandLabels.addView(brandDetail);
             brand.addView(brandLabels,new LinearLayout.LayoutParams(0,-2,1));
             Button searchButton=ChatGptMobileStyle.circularIcon(this,"search","搜索会话",ChatGptMobileStyle.WHITE,ChatGptMobileStyle.INK);brand.addView(searchButton,new LinearLayout.LayoutParams(dp(48),dp(48)));
             Button close=ChatGptMobileStyle.circularIcon(this,"close","关闭侧边栏",ChatGptMobileStyle.WHITE,ChatGptMobileStyle.INK);brand.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));close.setOnClickListener(v->drawer.dismiss());panel.addView(brand);
@@ -1277,16 +1381,17 @@ public final class MainActivity extends Activity {
             LinearLayout.LayoutParams searchSpacing=new LinearLayout.LayoutParams(-1,dp(46));searchSpacing.topMargin=dp(2);searchSpacing.bottomMargin=dp(8);panel.addView(searchBar,searchSpacing);
             searchButton.setOnClickListener(v->{boolean show=searchBar.getVisibility()!=View.VISIBLE;searchBar.setVisibility(show?View.VISIBLE:View.GONE);if(show)search.requestFocus();else search.setText("");});
             LinearLayout newRow=ChatGptMobileStyle.row(this);newRow.setPadding(dp(12),dp(11),dp(12),dp(11));newRow.setMinimumHeight(dp(54));
-            newRow.setBackground(ChatGptMobileStyle.pressable(this,ChatGptMobileStyle.outlinedCapsule(this,ChatGptMobileStyle.WHITE,ChatGptMobileStyle.HAIRLINE),ChatGptMobileStyle.SOFT,0));
-            ImageView newIcon=new ImageView(this);newIcon.setImageDrawable(new UiIcon("edit",ChatGptMobileStyle.INK));newRow.addView(newIcon,new LinearLayout.LayoutParams(dp(22),dp(22)));
-            TextView newLabel=ChatGptMobileStyle.text(this,"新对话",16,ChatGptMobileStyle.INK,true);newLabel.setPadding(dp(13),0,0,0);newRow.addView(newLabel,new LinearLayout.LayoutParams(0,-2,1));
-            newRow.setContentDescription("新建 Codex 对话");newRow.setOnClickListener(v->{drawer.dismiss();newChatWithProjectChoice();});panel.addView(newRow);
+            newRow.setBackground(ChatGptMobileStyle.pressable(this,ChatGptMobileStyle.capsule(this,ChatGptMobileStyle.INK),ChatGptMobileStyle.SOFT_PRESSED,0));
+            ImageView newIcon=new ImageView(this);newIcon.setImageDrawable(new UiIcon("edit",ChatGptMobileStyle.WHITE));newRow.addView(newIcon,new LinearLayout.LayoutParams(dp(22),dp(22)));
+            TextView newLabel=ChatGptMobileStyle.text(this,chatSection?"新建聊天":"新建工作会话",16,ChatGptMobileStyle.WHITE,true);newLabel.setPadding(dp(13),0,0,0);newRow.addView(newLabel,new LinearLayout.LayoutParams(0,-2,1));
+            newRow.setContentDescription(chatSection?"新建聊天":"新建工作会话");newRow.setOnClickListener(v->{drawer.dismiss();newChatForCurrentSection();});panel.addView(newRow);
             ChatGptMobileStyle.divider(panel,this);
-            TextView recent=ChatGptMobileStyle.text(this,"对话",12,ChatGptMobileStyle.MUTED,true);recent.setPadding(dp(6),0,0,dp(4));panel.addView(recent);
-            ChatFolders folders=new ChatFolders(this,rows,api==null?"":api.fingerprint,selectedThreadId,id->{
+            TextView recent=ChatGptMobileStyle.text(this,chatSection?"聊天":"工作",12,ChatGptMobileStyle.MUTED,true);recent.setPadding(dp(6),0,0,dp(4));panel.addView(recent);
+            ChatFolders folders=new ChatFolders(this,rows,api==null?"":api.fingerprint,conversationSection,selectedThreadId,id->{
                 drafts.put(selectedThreadId,composer.getText().toString());selectedThreadId=id;composer.setText(drafts.containsKey(id)?drafts.get(id):"");
+                rememberSectionSelection(id);
                 try{render(currentState);}catch(Exception ignored){}beginPolling();drawer.dismiss();
-            },id->{drawer.dismiss();createCodexChat(id);});panel.addView(folders,new LinearLayout.LayoutParams(-1,0,1));
+            },id->{drawer.dismiss();newChatInProject(id);});panel.addView(folders,new LinearLayout.LayoutParams(-1,0,1));
             search.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int start,int before,int count){folders.query(s.toString());}public void afterTextChanged(android.text.Editable e){}});
             ChatGptMobileStyle.divider(panel,this);
             LinearLayout footer=ChatGptMobileStyle.row(this);footer.setPadding(dp(10),dp(8),dp(10),dp(8));footer.setMinimumHeight(dp(52));
@@ -1306,13 +1411,23 @@ public final class MainActivity extends Activity {
     }
     private boolean creatingChat;
     private void createCodexChat(String base){
+        createConversation(base,"/v1/chats/new","正在创建 Chat 会话…");
+    }
+    private void createWorkChat(String base){
+        createConversation(base,"/v1/threads/new","正在创建工作会话…");
+    }
+    private void createConversation(String base,String path,String progress){
         if(creatingChat)return;if(api==null||currentState==null||!currentState.optBoolean("online")){toast("请先连接电脑");return;}
-        creatingChat=true;RemoteApi original=api;String operation=UUID.randomUUID().toString();toast("正在创建 Codex 对话…");
-        worker.execute(()->{RemoteApi channel=original.readChannel();try{JSONObject response=channel.call("POST","/v1/chats/new",new JSONObject().put("baseThreadId",base),operation);
-            runOnUiThread(()->{if(api!=original||isDestroyed())return;drafts.put(selectedThreadId,composer==null?"":composer.getText().toString());selectedThreadId=response.optString("id");if(composer!=null)composer.setText("");beginPolling(true);});
+        creatingChat=true;RemoteApi original=api;String operation=UUID.randomUUID().toString();toast(progress);
+        worker.execute(()->{RemoteApi channel=original.readChannel();try{JSONObject response=channel.call("POST",path,new JSONObject().put("baseThreadId",base),operation);
+            runOnUiThread(()->{if(api!=original||isDestroyed())return;drafts.put(selectedThreadId,composer==null?"":composer.getText().toString());conversationSection="/v1/threads/new".equals(path)?ChatCatalog.WORK:ChatCatalog.CHAT;selectedThreadId=response.optString("id");rememberSectionSelection(selectedThreadId);updateSectionSwitch();if(composer!=null){composer.setText("");composer.setHint(ChatCatalog.CHAT.equals(conversationSection)?"询问 RelayDeck":"向 Codex 分配工作");}beginPolling(true);});
         }catch(Exception e){runOnUiThread(()->{if(api==original&&!isDestroyed())toast("创建未确认，请先检查会话列表，避免重复创建："+error(e));});}finally{channel.cancel();runOnUiThread(()->creatingChat=false);}});
     }
-    private void newChatWithProjectChoice(){
+    private void newChatInProject(String base){
+        if(creatingChat)return;
+        if(ChatCatalog.WORK.equals(conversationSection))createWorkChat(base);else createCodexChat(base);
+    }
+    private void newChatWithProjectChoice(boolean workMode){
         if(api==null||currentState==null||!currentState.optBoolean("online")){toast("请先连接电脑");return;}
         try{
             java.util.List<JSONObject> rows=ChatCatalog.rows(currentState);
@@ -1331,13 +1446,15 @@ public final class MainActivity extends Activity {
                         bases[index]=row.optString("id");
                         index++;
                     }
-                    new AlertDialog.Builder(this).setTitle("在哪个项目中新建").setItems(names,(dialog,which)->createCodexChat(bases[which])).setNegativeButton("取消",null).show();
+                    new AlertDialog.Builder(this).setTitle((workMode?"工作":"Chat")+" · 选择项目").setItems(names,(dialog,which)->{
+                        if(workMode)createWorkChat(bases[which]);else createCodexChat(bases[which]);
+                    }).setNegativeButton("取消",null).show();
                     return;
                 }
             }
             if(direct==null&&!rows.isEmpty())direct=rows.get(0);
-            if(direct==null){toast("请先在电脑 Codex 中打开一个会话，再新建对话");return;}
-            createCodexChat(direct.optString("id"));
+            if(direct==null){toast("请先在电脑 Codex 中打开一个会话，再新建会话");return;}
+            if(workMode)createWorkChat(direct.optString("id"));else createCodexChat(direct.optString("id"));
         }catch(Exception e){toast("无法读取项目："+error(e));}
     }
     private TextView settingRow(LinearLayout parent,String title,String subtitle,Runnable action) {
@@ -1349,7 +1466,7 @@ public final class MainActivity extends Activity {
         TextView heading=ChatGptMobileStyle.text(this,title,13,ChatGptMobileStyle.MUTED,false);
         heading.setPadding(dp(8),dp(14),0,dp(6));parent.addView(heading);
         LinearLayout card=vertical();
-        card.setBackground(ChatGptMobileStyle.outlinedCapsule(this,ChatGptMobileStyle.WHITE,ChatGptMobileStyle.HAIRLINE));
+        card.setBackground(ChatGptMobileStyle.shape(this,ChatGptMobileStyle.WHITE,22,1,ChatGptMobileStyle.HAIRLINE));
         parent.addView(card,new LinearLayout.LayoutParams(-1,-2));
         return card;
     }
@@ -1562,6 +1679,9 @@ public final class MainActivity extends Activity {
         refreshPairingUi();
         String id = intent.getStringExtra("threadId"); if (id != null && !id.isEmpty() && !id.equals(selectedThreadId)) {
             if(composer != null)drafts.put(selectedThreadId,composer.getText().toString()); selectedThreadId = id;
+            JSONObject target=threadById(SessionService.latest==null?null:SessionService.latest.optJSONArray("threads"),id);
+            if(target!=null){conversationSection=ChatCatalog.inSection(target,ChatCatalog.CHAT)?ChatCatalog.CHAT:ChatCatalog.WORK;updateSectionSwitch();}
+            rememberSectionSelection(id);
             if(composer != null)composer.setText(drafts.containsKey(id)?drafts.get(id):"");
         }
         if (api != null) beginPolling();
@@ -1569,7 +1689,7 @@ public final class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out) {
         out.putBoolean("connectionGuideVisible",connectionGuideVisible);out.putBoolean("pairingInProgress",PairingCoordinator.busy()||pairingProgressCard!=null&&pairingProgressCard.getVisibility()==View.VISIBLE);
         if(api != null && composer != null)drafts.put(selectedThreadId,composer.getText().toString());
-        out.putString("selectedChat",selectedThreadId);out.putStringArrayList("draftIds",new java.util.ArrayList<>(drafts.keySet()));out.putStringArrayList("draftValues",new java.util.ArrayList<>(drafts.values()));super.onSaveInstanceState(out);
+        out.putString("selectedChat",selectedThreadId);out.putString("section",conversationSection);out.putStringArrayList("draftIds",new java.util.ArrayList<>(drafts.keySet()));out.putStringArrayList("draftValues",new java.util.ArrayList<>(drafts.values()));super.onSaveInstanceState(out);
     }
     private String error(Exception error) { String value = error.getMessage(); return value == null ? "连接失败，请检查地址、配对信息和网络" : value; }
     private void toast(String value) { Toast.makeText(this, value, Toast.LENGTH_LONG).show(); }
@@ -1589,7 +1709,7 @@ public final class MainActivity extends Activity {
         if(root!=null)root.requestFocus();super.onPause();
     }
     @Override protected void onPostResume(){super.onPostResume();getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);if(root!=null)root.requestFocus();}
-    @Override protected void onStop() { cancelVoice();renderHandler.removeCallbacks(themeClock);if(!restoreVpnPermission)networkRestoreAttempted=false;visible = false; generation++;modelOpenWanted="";modelLoading.clear(); unregisterReceiver(updates); if (api != null) { getPreferences(MODE_PRIVATE).edit().putString("selected:" + api.fingerprint,selectedThreadId).apply();api.cancel(); } commands.clear();for(RemoteApi channel:commandChannels.values())channel.cancel();commandChannels.clear(); dismissRailPreview();dismissModelPopup();if(usagePopup!=null)usagePopup.dismiss();if(jumpRail!=null)jumpRail.cancel();super.onStop(); }
+    @Override protected void onStop() { cancelVoice();renderHandler.removeCallbacks(themeClock);if(!restoreVpnPermission)networkRestoreAttempted=false;visible = false; generation++;modelOpenWanted="";modelLoading.clear(); unregisterReceiver(updates); if (api != null) { getPreferences(MODE_PRIVATE).edit().putString("selected:" + api.fingerprint,selectedThreadId).putString("section:" + api.fingerprint,conversationSection).apply();rememberSectionSelection(selectedThreadId);api.cancel(); } commands.clear();for(RemoteApi channel:commandChannels.values())channel.cancel();commandChannels.clear(); dismissRailPreview();dismissModelPopup();if(usagePopup!=null)usagePopup.dismiss();if(jumpRail!=null)jumpRail.cancel();super.onStop(); }
     @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(focused&&appUpdates!=null)appUpdates.focus();}
     @Override public void startActivityForResult(android.content.Intent intent,int request,Bundle options){if(appUpdates!=null)appUpdates.external();try{super.startActivityForResult(intent,request,options);}catch(RuntimeException e){if(appUpdates!=null)appUpdates.navigationFailed();throw e;}}
     @Override protected void onDestroy() { cancelVoice();if(speechInput!=null)speechInput.destroy();if(voiceModels!=null)voiceModels.close();generation++;renderRevision++;renderHandler.removeCallbacks(prepareRows);renderHandler.removeCallbacks(flushRows);renderWorker.shutdownNow();chatFiles.close();if(appUpdates!=null)appUpdates.close(); if (api != null) { api.cancel(); RemoteApi.release(api); } worker.shutdownNow(); super.onDestroy(); }

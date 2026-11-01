@@ -79,7 +79,8 @@ test('disabled or invalid local chat creation returns explicit errors',async t=>
   const invalid=await f.request('POST','/v1/chats/new',{baseThreadId:'../private'},{...headers,'idempotency-key':'new-local-chat-00005'});
   assert.equal(invalid.status,200);
   assert.equal((await f.request('POST','/v1/chats/new',{baseThreadId:'allowed-chat',name:'x'.repeat(81)},{...headers,'idempotency-key':'new-local-chat-00003'})).status,400);
-  assert.equal((await f.request('POST','/v1/chats/new',{baseThreadId:'allowed-chat',model:123},{...headers,'idempotency-key':'new-local-chat-00004'})).status,400);
+  assert.equal((await f.request('POST','/v1/chats/new',{baseThreadId:'allowed-chat',model:'gpt-test'},{...headers,'idempotency-key':'new-local-chat-00004'})).status,400);
+  assert.equal((await f.request('POST','/v1/chats/new',{baseThreadId:'allowed-chat',serviceTier:'priority'},{...headers,'idempotency-key':'new-local-chat-00006'})).status,400);
   assert.equal((await f.request('GET','/v1/threads',undefined,{authorization:`Bearer ${token}`})).data.canCreateLocalChats,true);
 });
 test('installed desktop version is advertised separately from sync revision',async t=>{

@@ -40,18 +40,23 @@ export function validateConfig(value) {
       listenPort: Number(et.listenPort || 11011), rpcPort: Number(et.rpcPort || 15899), devName: 'relaydeck-et' } };
   if (safe.mode === 'bundled') validateEasyTier(safe);
   if (relay) {
-    const local = value.relayLocal === true;
+    // ConfigStore persists Relay settings in their normalized shape. Accept
+    // that shape on restart as well as the editor's top-level draft fields.
+    const savedRelay = value.relay && typeof value.relay === 'object' ? value.relay : null;
+    const relayUrlInput = value.relayUrl || savedRelay?.url;
+    const relayPublicUrlInput = value.relayPublicUrl || savedRelay?.publicUrl || relayUrlInput;
+    const local = value.relayLocal === true || (value.relayLocal === undefined && savedRelay?.local === true);
     if (local) {
-      const publicUrl = relayWebSocketUrl(value.relayPublicUrl || value.relayUrl, true);
+      const publicUrl = relayWebSocketUrl(relayPublicUrlInput, true);
       const publicHost = new URL(publicUrl).hostname;
       const loopbackPublic = publicHost === '127.0.0.1' || publicHost === 'localhost' || publicHost === '[::1]' || publicHost === '::1';
       safe.relay = loopbackPublic
-        ? { url:relayWebSocketUrl(value.relayUrl || publicUrl, false), publicUrl, local }
+        ? { url:relayWebSocketUrl(relayUrlInput || publicUrl, false), publicUrl, local }
         : { url:'ws://127.0.0.1:19647/v1/relay', publicUrl, local };
       if (safe.relay.url !== 'ws://127.0.0.1:19647/v1/relay' && safe.relay.url !== 'wss://127.0.0.1:19647/v1/relay') throw Error('由插件托管 Relay 时，电脑端地址固定为 127.0.0.1:19647；请填写手机公网 WSS 地址');
     } else {
-      const relayUrl = relayWebSocketUrl(value.relayUrl, false);
-      const publicUrl = relayWebSocketUrl(value.relayPublicUrl || relayUrl, true);
+      const relayUrl = relayWebSocketUrl(relayUrlInput, false);
+      const publicUrl = relayWebSocketUrl(relayPublicUrlInput || relayUrl, true);
       safe.relay = { url:relayUrl, publicUrl, local };
     }
   }
@@ -99,23 +104,32 @@ export async function protectDirectory(path) {
     await run('icacls.exe', [path, '/inheritance:r', '/grant:r', `*${stdout.trim()}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F'], { windowsHide: true });
   }
 }
+function normalizedSecret(value) {
+  return typeof value === 'string' ? value.replace(/^\uFEFF/, '').trim() : '';
+}
+function savedRelayProfile(config) {
+  if (config?.relay && typeof config.relay === 'object') return config.relay;
+  const profile = config?.profiles?.relay;
+  return profile && typeof profile === 'object' ? profile : null;
+}
 async function prepareLocalRelayConfig(root, requestedSecret) {
   const relayRoot = join(root, 'relay');
   const path = join(relayRoot, 'relay.local.json');
   let config = await readJson(path, null);
   if (config) {
     if (config.host !== '127.0.0.1' || config.port !== 19647) throw Error('本机 Relay 配置必须监听 127.0.0.1:19647');
-    const existing = typeof config.registrationSecret === 'string' ? config.registrationSecret : '';
-    if (existing && requestedSecret && existing !== requestedSecret)
+    const existing = normalizedSecret(config.registrationSecret);
+    const requested = normalizedSecret(requestedSecret);
+    if (existing && requested && existing !== requested)
       throw Error('本机 Relay 的注册密钥与当前配置不一致；请清除 Relay 密钥后重新填写，或删除本机 Relay 配置');
-    config.registrationSecret = existing || requestedSecret || randomBytes(32).toString('hex');
+    config.registrationSecret = existing || requested || randomBytes(32).toString('hex');
     config.adminToken = typeof config.adminToken === 'string' && config.adminToken
       ? config.adminToken : randomBytes(32).toString('hex');
     config.dataFile = typeof config.dataFile === 'string' && config.dataFile
       ? config.dataFile : join(relayRoot, 'relay-devices.local.json');
     return { path, config, secret:config.registrationSecret, changed:true };
   }
-  const registrationSecret = requestedSecret || randomBytes(32).toString('hex');
+  const registrationSecret = normalizedSecret(requestedSecret) || randomBytes(32).toString('hex');
   config = {
     host:'127.0.0.1',
     port:19647,
@@ -170,9 +184,9 @@ export class ConfigStore {
     next.profiles = { ...networkProfiles(prior), [next.mode]: next.mode === 'relay' ? { relay: next.relay } : { host: next.host, port: next.port } };
     const supplied = next.mode === 'bundled' ? input.networkSecret : undefined;
     const relaySecretInput = next.mode === 'relay' ? input.relayRegistrationSecret : undefined;
-    let relaySecret = typeof relaySecretInput === 'string' && relaySecretInput.length ? relaySecretInput : undefined;
     if (supplied !== undefined && (typeof supplied !== 'string' || supplied.length > 512)) throw Error('组网密钥最多 512 字符');
     if (relaySecretInput !== undefined && (typeof relaySecretInput !== 'string' || relaySecretInput.length > 512)) throw Error('Relay 注册密钥最多 512 字符');
+    let relaySecret = normalizedSecret(relaySecretInput) || undefined;
     let localRelay;
     if (next.mode === 'relay' && next.relay.local && input.clearRelaySecret !== true) {
       if (!relaySecret && !prior?.relayRegistrationSecretCipher) {
@@ -180,13 +194,27 @@ export class ConfigStore {
         // a shared secret. The generated value is encrypted below.
       } else if (!relaySecret && prior?.relayRegistrationSecretCipher) {
         const localPath = join(this.root, 'relay', 'relay.local.json');
-        if (!await readJson(localPath, null)) relaySecret = await this.unprotect(prior.relayRegistrationSecretCipher);
+        if (!await readJson(localPath, null)) relaySecret = normalizedSecret(await this.unprotect(prior.relayRegistrationSecretCipher)) || undefined;
       }
       localRelay = await prepareLocalRelayConfig(this.root, relaySecret);
       relaySecret = localRelay.secret;
+    } else if (next.mode === 'relay') {
+      const previousRelay = savedRelayProfile(prior);
+      const sameExternalRelay = previousRelay?.local !== true && previousRelay?.url === next.relay.url;
+      if (!relaySecret && input.clearRelaySecret !== true && prior?.relayRegistrationSecretCipher && sameExternalRelay) {
+        relaySecret = normalizedSecret(await this.unprotect(prior.relayRegistrationSecretCipher)) || undefined;
+      }
+      if (!relaySecret) {
+        const reason = prior?.relayRegistrationSecretCipher && !sameExternalRelay
+          ? 'Relay 地址已变更，必须重新填写新 Relay 的注册密钥'
+          : input.clearRelaySecret === true
+            ? '清除 Relay 注册密钥后必须立即填写新的注册密钥'
+            : '请填写 Relay 注册密钥';
+        throw Error(reason);
+      }
     }
     next.secretCipher = next.mode === 'bundled' && input.clearSecret ? undefined : supplied ? await this.protect(supplied) : prior?.secretCipher;
-    next.relayRegistrationSecretCipher = next.mode === 'relay' && input.clearRelaySecret
+    next.relayRegistrationSecretCipher = next.mode === 'relay' && input.clearRelaySecret && !relaySecret
       ? undefined
       : relaySecret ? await this.protect(relaySecret) : prior?.relayRegistrationSecretCipher;
     await writeLocalRelayConfig(localRelay);
@@ -194,7 +222,9 @@ export class ConfigStore {
   }
   async relayRegistrationSecret() {
     const value = await this.load();
-    return value?.relayRegistrationSecretCipher ? this.unprotect(value.relayRegistrationSecretCipher) : '';
+    return value?.relayRegistrationSecretCipher
+      ? normalizedSecret(await this.unprotect(value.relayRegistrationSecretCipher))
+      : '';
   }
 }
 export function networkProfiles(value) {

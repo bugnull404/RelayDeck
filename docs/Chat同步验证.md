@@ -13,7 +13,7 @@
 | 通过公开 app-server 实时同步 Chat 原会话 | 没有公开方法 | 当前安装版 schema |
 | RelayDeck 同步 Chat 原会话 | 暂不支持 | 不调用私有令牌、DOM 或数据库 |
 | RelayDeck 同步 Codex 工作会话 | 支持 | 仓库自动测试；真机链路需单独验收 |
-| RelayDeck 新建 Codex 本地对话 | 支持 | app-server 自动测试；不是 ChatGPT 原 Chat |
+| RelayDeck 新建 Chat 预设 | 支持 | app-server 自动测试；模型不可选、仅低中高；不是 ChatGPT 原 Chat |
 
 **不是说 ChatGPT Chat 不能发消息，而是说 Codex 没有向第三方插件公开它的 Chat 原会话接口。** 因此不能用“网页里能收发”推导出“RelayDeck 能同步”。
 
@@ -50,7 +50,7 @@ RelayDeck 不把这条内部通道当作产品接口，也不通过它复制令�
 
 RelayDeck 的目录来自 Codex app-server 的 `thread/list`，消息读取和实时事件来自 Codex 工作会话。`Chat 引用` 只是说明某个 ChatGPT 对话被引用进 Codex 后形成了工作 thread，不能把它当作 Chat 原会话。
 
-RelayDeck 还新增了“Codex 本地对话”：通过 `thread/start`、`turn/start`、`turn/steer` 和 `thread/turns/list` 管理 RelayDeck 自己创建的持久本地 thread。它提供聊天式体验并可由手机同步，但依然不是 ChatGPT 普通 Chat，也不会出现在 ChatGPT 历史中。详见 [Codex本地对话](Codex本地对话.md)。
+RelayDeck 还提供“Chat 预设”：通过 `thread/start`、`turn/start`、`turn/steer` 和 `thread/turns/list` 管理 RelayDeck 自己创建的持久本地 thread。Chat 不提供模型选择，只允许低、中、高思考强度；工作预设继续使用完整模型目录和详细说明。二者依然不是 ChatGPT 普通 Chat，也不会出现在 ChatGPT 历史中。详见 [Codex本地对话](Codex本地对话.md)。
 
 ## 已完成的验证
 

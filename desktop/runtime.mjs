@@ -172,6 +172,7 @@ export class GatewayRuntime {
     if (this.active.config.mode !== 'relay') return base;
     const agent = this.active.relayAgent;
     if (!agent) throw Error('Relay Agent 尚未启动');
+    if (!agent.status().connected) throw Error(agent.status().message || 'Relay 尚未连接');
     const issued = await agent.requestTicket(120000);
     return {
       ...base,

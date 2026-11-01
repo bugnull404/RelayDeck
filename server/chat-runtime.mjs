@@ -96,7 +96,7 @@ export class ChatRuntime extends EventEmitter {
     return this.bridge.createThread(input);
   }
 
-  async localCreate({ baseThreadId, name, model }) {
+  async localCreate({ baseThreadId, name }) {
     if (!this.local?.writable) throw Error('请先在电脑允许手机选择和新建会话');
     if (typeof baseThreadId !== 'string' || !baseThreadId) throw Error('请选择一个已有会话作为新对话的项目');
     const catalog = await this.catalog();
@@ -105,11 +105,10 @@ export class ChatRuntime extends EventEmitter {
     const cwd = await this.threadDirectory(baseThreadId);
     if (!cwd) throw Error('当前会话工作目录未就绪，请先同步该会话或选择其他项目');
     const groupId = typeof base.groupId === 'string' && base.groupId.startsWith('project:') ? base.groupId : 'codex-chats';
-    const groupName = groupId.startsWith('project:') && typeof base.groupName === 'string' ? base.groupName : 'Codex 对话';
+    const groupName = groupId.startsWith('project:') && typeof base.groupName === 'string' ? base.groupName : 'Chat';
     const row = await this.local.createThread({
       cwd,
       name,
-      model: typeof model === 'string' ? model : undefined,
       groupId,
       groupName,
       groupOrder: Number.isInteger(base.groupOrder) ? base.groupOrder : 2,

@@ -4,6 +4,17 @@ import org.json.*;
 import java.util.*;
 
 final class ChatCatalog {
+    static final String CHAT = "chat";
+    static final String WORK = "work";
+
+    static boolean isChat(JSONObject row) {
+        return row != null && "codex-chat".equals(row.optString("mode"));
+    }
+
+    static boolean inSection(JSONObject row, String section) {
+        return isChat(row) == CHAT.equals(section);
+    }
+
     static List<JSONObject> rows(JSONObject state) throws Exception {
         LinkedHashMap<String,JSONObject> rows=new LinkedHashMap<>();
         for(String key:new String[]{"catalog","threads"}){
@@ -15,6 +26,12 @@ final class ChatCatalog {
         }
         ArrayList<JSONObject> result=new ArrayList<>(rows.values());
         result.sort(Comparator.comparingInt((JSONObject row)->row.optInt("groupOrder",Integer.MAX_VALUE)).thenComparing(row->row.optString("groupId","chats")).thenComparingInt(row->row.optInt("order",Integer.MAX_VALUE)));
+        return result;
+    }
+
+    static List<JSONObject> rowsForSection(JSONObject state,String section) throws Exception {
+        List<JSONObject> result=new ArrayList<>();
+        for(JSONObject row:rows(state))if(inSection(row,section))result.add(row);
         return result;
     }
 }
